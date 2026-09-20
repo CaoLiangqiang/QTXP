@@ -38,7 +38,8 @@ ffmpeg -hide_banner -loglevel error -y -framerate 20 -i "$SRC/turn/%04d.png" \
   -loop 0 "$OUT/环绕.gif"
 
 echo "=== 4/4 效果图转 JPEG ==="
-for f in "$SRC"/0*.png; do
+# 匹配所有「两位数字_名字.png」的成品，既含 01..05 分析图也含 10..12 气氛图
+for f in "$SRC"/[0-9][0-9]_*.png; do
   b="$(basename "$f" .png)"
   ffmpeg -hide_banner -loglevel error -y -i "$f" -vf "scale=1920:-1:flags=lanczos" -q:v 3 "$OUT/$b.jpg"
 done

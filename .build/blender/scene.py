@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""前滩尚品 · Blender 场景构建（供 stills / sun_study / turntable 复用）
+"""前滩尚品 · Blender 场景构建（供 stills / hero / sun_study / turntable 复用）
 
 坐标约定：+X 东，+Y 北，+Z 上，单位米。11幢 南立面位于 y=0。
 几何来自 geometry.json（由 solar.py 用日照数据反推楼间距后写出）。
 
-只用 bpy 数据 API（from_pydata / bpy.data.*），不依赖 bpy.ops 的上下文，
-因此在 --background 下行为稳定。
+只用 bpy 数据 API 建几何（from_pydata / bpy.data.*），不依赖 bpy.ops 的上下文，
+唯一用到 ops 的是生成一个球体模板网格，失败时退化为八面体。
 """
 import json
 import math
@@ -30,7 +30,7 @@ SUN_COLOR = {5.5: '#c00000', 5: '#e62e2e', 4.5: '#f06018', 4: '#f08c1e',
 RAMP = ['#1c4e8a', '#2f8fc4', '#63c9a8', '#ffd86b', '#f3903f', '#c9302c']
 
 
-# ---------------- 工具 ----------------
+# ---------------- 颜色 ----------------
 def srgb_to_linear(c):
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
@@ -50,14 +50,20 @@ def ramp_hex(stops, t):
     return '#%02x%02x%02x' % tuple(int(a[k] + (b[k] - a[k]) * f) for k in range(3))
 
 
+# ---------------- 网格工具 ----------------
 def clear_scene():
+    global _BLOB
+    _BLOB = None                      # 缓存的网格会被下面删掉，必须同时失效
     for coll in (bpy.data.objects, bpy.data.meshes, bpy.data.materials,
-                 bpy.data.lights, bpy.data.cameras):
+                 bpy.data.lights, bpy.data.cameras, bpy.data.collections):
         for item in list(coll):
-            coll.remove(item)
+            try:
+                coll.remove(item)
+            except Exception:
+                pass
 
 
-def add_box(name, x0, x1, y0, y1, z0, z1, mat=None, parent_col=None):
+def add_box(name, x0, x1, y0, y1, z0, z1, mat=None, col=None):
     verts = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
              (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
     faces = [(0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1),
@@ -69,11 +75,11 @@ def add_box(name, x0, x1, y0, y1, z0, z1, mat=None, parent_col=None):
     ob = bpy.data.objects.new(name, me)
     if mat:
         ob.data.materials.append(mat)
-    (parent_col or bpy.context.scene.collection).objects.link(ob)
+    (col or bpy.context.scene.collection).objects.link(ob)
     return ob
 
 
-def add_quad(name, pts, mat=None, parent_col=None):
+def add_quad(name, pts, mat=None, col=None):
     me = bpy.data.meshes.new(name)
     me.from_pydata(pts, [], [(0, 1, 2, 3)])
     me.validate()
@@ -81,12 +87,62 @@ def add_quad(name, pts, mat=None, parent_col=None):
     ob = bpy.data.objects.new(name, me)
     if mat:
         ob.data.materials.append(mat)
-    (parent_col or bpy.context.scene.collection).objects.link(ob)
+    (col or bpy.context.scene.collection).objects.link(ob)
     return ob
 
 
+_BLOB = None
+
+
+def blob_mesh():
+    """一个球体模板网格，树冠等用它做实例复用（只生成一次）。"""
+    global _BLOB
+    # 被 clear_scene 删除后 _BLOB 会变成悬空的 StructRNA，
+    # 访问其任何属性都会抛 ReferenceError，不能只用 `in bpy.data.meshes` 判断。
+    try:
+        if _BLOB is not None and _BLOB.name in bpy.data.meshes:
+            return _BLOB
+    except ReferenceError:
+        _BLOB = None
+    try:
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=1.0)
+        ob = bpy.context.object
+        _BLOB = ob.data
+        bpy.data.objects.remove(ob, do_unlink=True)
+    except Exception as err:                       # 退化为八面体，远景足够
+        print('球体 ops 不可用，退化为八面体:', err, file=sys.stderr)
+        v = [(0, 0, 1), (1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0), (0, 0, -1)]
+        f = [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1),
+             (5, 2, 1), (5, 3, 2), (5, 4, 3), (5, 1, 4)]
+        me = bpy.data.meshes.new('blob')
+        me.from_pydata(v, [], f)
+        me.validate()
+        me.update()
+        _BLOB = me
+    return _BLOB
+
+
+def add_instance(name, mesh, loc, scale, mat=None, col=None):
+    ob = bpy.data.objects.new(name, mesh)
+    ob.location = Vector(loc)
+    ob.scale = Vector(scale)
+    if mat:
+        ob.data = mesh          # 共享网格
+        if mat.name not in [m.name for m in mesh.materials if m]:
+            pass
+    (col or bpy.context.scene.collection).objects.link(ob)
+    if mat:
+        ob.material_slots  # noqa  触发 slot
+        if not ob.data.materials:
+            ob.data.materials.append(mat)
+        else:
+            ob.material_slots[0].link = 'OBJECT'
+            ob.material_slots[0].material = mat
+    return ob
+
+
+# ---------------- 材质 ----------------
 def set_input(node, names, value):
-    """Principled BSDF 的输入名在各版本间有变动，按候选名依次尝试。"""
     for n in names:
         if n in node.inputs:
             node.inputs[n].default_value = value
@@ -94,7 +150,9 @@ def set_input(node, names, value):
     return False
 
 
-def make_mat(name, color, rough=0.5, metal=0.0, transmit=0.0, emit=None, emit_str=0.0):
+def make_mat(name, color, rough=0.5, metal=0.0, transmit=0.0,
+             emit=None, emit_str=0.0, bump=None, coat=0.0):
+    """bump=(scale, strength) 时加一层程序化噪声凹凸，让大面积平板不再死板。"""
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
@@ -106,56 +164,157 @@ def make_mat(name, color, rough=0.5, metal=0.0, transmit=0.0, emit=None, emit_st
     set_input(bsdf, ['Roughness'], rough)
     set_input(bsdf, ['Metallic'], metal)
     set_input(bsdf, ['Transmission Weight', 'Transmission'], transmit)
-    set_input(bsdf, ['IOR'], 1.45)
+    set_input(bsdf, ['IOR'], 1.5)
+    set_input(bsdf, ['Coat Weight', 'Clearcoat'], coat)
     if emit:
         set_input(bsdf, ['Emission Color', 'Emission'], emit)
         set_input(bsdf, ['Emission Strength'], emit_str)
+    if bump:
+        scale, strength = bump
+        noise = nt.nodes.new('ShaderNodeTexNoise')
+        noise.inputs['Scale'].default_value = scale
+        if 'Detail' in noise.inputs:
+            noise.inputs['Detail'].default_value = 6.0
+        bn = nt.nodes.new('ShaderNodeBump')
+        bn.inputs['Strength'].default_value = strength
+        nt.links.new(noise.outputs['Fac'], bn.inputs['Height'])
+        nt.links.new(bn.outputs['Normal'], bsdf.inputs['Normal'])
+        # 同一噪声轻微扰动基色，避免整面同色
+        mix = nt.nodes.new('ShaderNodeMixRGB')
+        mix.blend_type = 'MULTIPLY'
+        mix.inputs['Fac'].default_value = 0.10
+        mix.inputs['Color1'].default_value = color
+        mix.inputs['Color2'].default_value = (1.12, 1.08, 1.0, 1.0)
+        nt.links.new(noise.outputs['Fac'], mix.inputs['Fac'])
+        nt.links.new(mix.outputs['Color'], bsdf.inputs['Base Color'])
     if transmit > 0:
         m.use_backface_culling = False
-        try:
-            m.blend_method = 'BLEND'
-        except Exception:
-            pass
     return m
 
 
-# ---------------- 场景 ----------------
-def build(mode='arch', metric='price'):
-    """mode: 'arch' 写实建筑材质 / 'data' 窗面按数据着色"""
+def palette():
+    """一套材质，构建与渲染脚本共用。
+
+    配色的关键不是"好看的灰"，而是**色相分离**：暖砂岩立面 ↔ 冷蓝玻璃 ↔
+    饱和绿景观 ↔ 暖铺装。全是低饱和灰白时，再好的光也救不回来（实测
+    上一版全图平均饱和度只有 3%，几乎是黑白片）。"""
+    p = {}
+    p['地面'] = make_mat('地面', hex_rgba('#8a8a6e'), rough=0.95, bump=(6, 0.06))
+    p['铺装'] = make_mat('铺装', hex_rgba('#b5a892'), rough=0.70, bump=(22, 0.10))
+    p['草坪'] = make_mat('草坪', hex_rgba('#4a7a2c'), rough=0.95, bump=(40, 0.22))
+    p['沥青'] = make_mat('沥青', hex_rgba('#35373c'), rough=0.80, bump=(30, 0.08))
+    # 立面：暖砂岩，与冷玻璃形成互补色对比
+    p['外墙'] = make_mat('外墙', hex_rgba('#e6d3ac'), rough=0.56, bump=(9, 0.10))
+    p['外墙深'] = make_mat('外墙深', hex_rgba('#a8876a'), rough=0.60, bump=(9, 0.10))
+    p['石材'] = make_mat('石材基座', hex_rgba('#6a5c4c'), rough=0.52, bump=(14, 0.14))
+    p['线条'] = make_mat('楼板线条', hex_rgba('#f6efdd'), rough=0.40)
+    # 玻璃：不透射，用低粗糙度深蓝反射面 —— 让它反射天空。
+    # 纯透射在远景里只会变成一片黑，反射才是窗户"像玻璃"的关键。
+    p['玻璃'] = make_mat('玻璃', hex_rgba('#0f2e45'), rough=0.030, metal=0.25, coat=0.6)
+    p['栏板'] = make_mat('玻璃栏板', hex_rgba('#5f8ca6'), rough=0.05, transmit=0.70, coat=0.5)
+    p['金属'] = make_mat('金属', hex_rgba('#3f474d'), rough=0.30, metal=0.9)
+    p['窗框'] = make_mat('窗框', hex_rgba('#23272b'), rough=0.36, metal=0.6)
+    p['女儿墙'] = make_mat('女儿墙', hex_rgba('#d8c4a0'), rough=0.54, bump=(9, 0.08))
+    p['屋面'] = make_mat('屋面', hex_rgba('#4e4f46'), rough=0.85, bump=(18, 0.12))
+    p['树干'] = make_mat('树干', hex_rgba('#4a3524'), rough=0.85)
+    p['树冠'] = make_mat('树冠', hex_rgba('#356b22'), rough=0.9, bump=(28, 0.3))
+    p['树冠2'] = make_mat('树冠2', hex_rgba('#5c8a2e'), rough=0.9, bump=(24, 0.3))
+    p['邻楼'] = make_mat('邻楼', hex_rgba('#b8a894'), rough=0.60)
+    p['邻楼2'] = make_mat('邻楼2', hex_rgba('#9a9384'), rough=0.62)
+    p['邻窗'] = make_mat('邻窗', hex_rgba('#1b2f40'), rough=0.10, metal=0.3)
+    return p
+
+
+# ---------------- 环境文脉 ----------------
+def add_context(P, col):
+    """场地之外的东西：铺装、草坪、道路、行道树、邻楼体量。
+    空场地是"假"的最大来源——哪怕是粗糙的文脉也远胜一块灰板。"""
+    x0 = min(b['x0'] for b in BUILDINGS.values())
+    x1 = max(b['x1'] for b in BUILDINGS.values())
+    y0 = BUILDINGS['11幢']['y0']
+    y1 = BUILDINGS['5幢']['y1']
+    cx = (x0 + x1) / 2
+
+    # 大地面
+    add_box('大地', cx - 400, cx + 400, y0 - 400, y1 + 400, -0.5, -0.05, P['地面'], col)
+    # 小区内部铺装
+    add_box('场地铺装', x0 - 18, x1 + 18, y0 - 22, y1 + 22, -0.05, 0.02, P['铺装'], col)
+
+    # 楼间草坪 + 步道
+    for a, b in (('11幢', '8幢'), ('8幢', '5幢')):
+        ya, yb = BUILDINGS[a]['y1'], BUILDINGS[b]['y0']
+        add_box(f'草坪_{a}_{b}', x0 - 6, x1 + 6, ya + 4, yb - 4, 0.02, 0.10, P['草坪'], col)
+        add_box(f'步道_{a}_{b}', x0 - 6, x1 + 6, (ya + yb) / 2 - 1.6,
+                (ya + yb) / 2 + 1.6, 0.10, 0.16, P['铺装'], col)
+
+    # 南北两条市政道路
+    for yy, nm in ((y0 - 30, '南路'), (y1 + 30, '北路')):
+        add_box(nm, cx - 260, cx + 260, yy - 8, yy + 8, -0.05, 0.03, P['沥青'], col)
+        for k in range(-22, 23):                   # 车道中线虚线
+            add_box(f'{nm}_线_{k}', cx + k * 11, cx + k * 11 + 4.5,
+                    yy - 0.18, yy + 0.18, 0.03, 0.05, P['线条'], col)
+
+    # 行道树与组团树
+    bm = blob_mesh()
+    spots = []
+    for yy in (y0 - 24, y1 + 24):
+        spots += [(cx + k * 13, yy, 3.4) for k in range(-9, 10)]
+    for a, b in (('11幢', '8幢'), ('8幢', '5幢')):
+        ya, yb = BUILDINGS[a]['y1'], BUILDINGS[b]['y0']
+        spots += [(x0 + 4 + k * 12, ya + 7, 2.8) for k in range(0, 5)]
+        spots += [(x0 + 9 + k * 12, yb - 7, 2.6) for k in range(0, 4)]
+    spots += [(x0 - 13, y0 + k * 16, 3.0) for k in range(0, 7)]
+    spots += [(x1 + 13, y0 + k * 16, 3.0) for k in range(0, 7)]
+
+    for i, (tx, ty, h) in enumerate(spots):
+        jx = ((i * 37) % 11 - 5) * 0.35            # 确定性抖动，避免排成死板的行列
+        jy = ((i * 53) % 9 - 4) * 0.35
+        s = 1.0 + ((i * 29) % 7 - 3) * 0.07
+        add_box(f'树干_{i}', tx + jx - 0.16, tx + jx + 0.16, ty + jy - 0.16, ty + jy + 0.16,
+                0.0, h * 0.42 * s, P['树干'], col)
+        add_instance(f'树冠_{i}', bm, (tx + jx, ty + jy, h * 0.78 * s),
+                     (h * 0.40 * s, h * 0.40 * s, h * 0.46 * s),
+                     P['树冠'] if i % 3 else P['树冠2'], col)
+
+    # 邻楼体量：让场地不悬在虚空里
+    neigh = [(-150, -60, 34), (-150, 40, 46), (-150, 130, 30),
+             (150, -50, 40), (150, 60, 52), (150, 150, 36),
+             (-40, -130, 28), (60, -130, 44), (-30, 210, 50), (70, 210, 38)]
+    for i, (nx, ny, nh) in enumerate(neigh):
+        w, d = 30 + (i % 3) * 9, 20 + (i % 2) * 8
+        add_box(f'邻楼_{i}', nx - w / 2, nx + w / 2, ny - d / 2, ny + d / 2,
+                0, nh, P['邻楼'] if i % 2 else P['邻楼2'], col)
+        for f in range(1, int(nh // 3.2)):         # 简化窗带
+            add_box(f'邻楼_{i}_窗_{f}', nx - w / 2 - 0.05, nx + w / 2 + 0.05,
+                    ny - d / 2 - 0.05, ny + d / 2 + 0.05,
+                    f * 3.2 + 0.9, f * 3.2 + 2.3, P['邻窗'], col)
+
+
+# ---------------- 主场景 ----------------
+def build(mode='arch', metric='price', balconies=True, context=True):
     clear_scene()
     scene = bpy.context.scene
+    P = palette()
 
-    # ---- 材质 ----
-    m_ground = make_mat('地面', hex_rgba('#6b6f68'), rough=0.92)
-    m_facade = make_mat('外墙', hex_rgba('#d8d3c8'), rough=0.62)
-    m_facade_d = make_mat('外墙深', hex_rgba('#b9b2a4'), rough=0.68)
-    m_podium = make_mat('基座', hex_rgba('#5c5a55'), rough=0.75)
-    m_slab = make_mat('楼板线条', hex_rgba('#efeae0'), rough=0.5)
-    m_glass = make_mat('玻璃', hex_rgba('#20313d'), rough=0.06, metal=0.0, transmit=0.85)
-    m_frame = make_mat('窗框', hex_rgba('#2e3338'), rough=0.4, metal=0.7)
-    m_para = make_mat('女儿墙', hex_rgba('#c8c2b6'), rough=0.6)
+    env = bpy.data.collections.new('环境')
+    scene.collection.children.link(env)
+    if context:
+        add_context(P, env)
+    else:
+        add_box('大地', -400, 400, -400, 500, -0.5, -0.05, P['地面'], env)
 
-    # ---- 地面 ----
-    span = 220
-    ymid = BUILDINGS['5幢']['y1'] / 2
-    add_box('地面', -span, span, ymid - span, ymid + span, -0.4, 0.0, m_ground)
-
-    # ---- 数据索引 ----
-    by_key = {}
-    for u in UNITS:
-        by_key[(u['b'], u['u'], u['rm'], u['fr'])] = u
+    by_key = {(u['b'], u['u'], u['rm'], u['fr']): u for u in UNITS}
     valid = [u for u in UNITS if u['p'] is not None]
     ext = {
         'price': (min(u['p'] for u in valid), max(u['p'] for u in valid)),
         'total': (min(u['t'] for u in valid), max(u['t'] for u in valid)),
         'area': (min(u['a'] for u in valid), max(u['a'] for u in valid)),
     }
-
     data_mats = {}
 
     def unit_mat(u):
         if mode != 'data':
-            return m_glass
+            return P['玻璃']
         if metric == 'sun':
             hx = SUN_COLOR.get(u['s'], '#888888')
         else:
@@ -163,39 +322,38 @@ def build(mode='arch', metric='price'):
             key = {'price': 'p', 'total': 't', 'area': 'a'}[metric]
             hx = ramp_hex(RAMP, (u[key] - lo) / (hi - lo))
         if hx not in data_mats:
-            data_mats[hx] = make_mat('数据_' + hx, hex_rgba(hx), rough=0.28,
-                                     emit=hex_rgba(hx), emit_str=0.32)
+            data_mats[hx] = make_mat('数据_' + hx, hex_rgba(hx), rough=0.25,
+                                     emit=hex_rgba(hx), emit_str=0.45)
         return data_mats[hx]
 
-    # ---- 楼栋 ----
     for name in ORDER:
         b = BUILDINGS[name]
         cols = [tuple(c) for c in b['cols']]
         floors = sorted({u['fr'] for u in UNITS if u['b'] == name})
         min_f = min(floors)
         roof = GEO['n_storey'] * FLOOR_H
-
         col = bpy.data.collections.new(name)
         scene.collection.children.link(col)
 
-        # 主体：按层分段，交替微差外墙色，避免大面积单一色板
         for f in range(1, GEO['n_storey'] + 1):
             z0, z1 = (f - 1) * FLOOR_H, f * FLOOR_H
-            mat = m_podium if f < min_f else (m_facade if f % 2 else m_facade_d)
-            add_box(f'{name}_体_{f}', b['x0'], b['x1'], b['y0'], b['y1'], z0, z1,
-                    mat, col)
-            # 楼板线条：只向南北外挑，东西向不外扩（否则山墙侧会出现台阶状轮廓）
+            mat = P['石材'] if f < min_f else (P['外墙'] if f % 2 else P['外墙深'])
+            add_box(f'{name}_体_{f}', b['x0'], b['x1'], b['y0'], b['y1'], z0, z1, mat, col)
+            # 楼板线条：只向南北外挑（东西外扩会让山墙侧变成台阶状轮廓）
             add_box(f'{name}_线_{f}', b['x0'], b['x1'],
-                    b['y0'] - 0.28, b['y1'] + 0.28, z1 - 0.22, z1, m_slab, col)
+                    b['y0'] - 0.30, b['y1'] + 0.30, z1 - 0.22, z1, P['线条'], col)
 
-        # 女儿墙
-        add_box(f'{name}_女儿墙', b['x0'] - 0.1, b['x1'] + 0.1,
-                b['y0'] - 0.1, b['y1'] + 0.1, roof, roof + GEO['parapet'], m_para, col)
-        # 屋面
+        add_box(f'{name}_女儿墙', b['x0'] - 0.12, b['x1'] + 0.12,
+                b['y0'] - 0.12, b['y1'] + 0.12, roof, roof + GEO['parapet'], P['女儿墙'], col)
         add_box(f'{name}_屋面', b['x0'], b['x1'], b['y0'], b['y1'],
-                roof - 0.05, roof + 0.05, m_facade_d, col)
+                roof - 0.05, roof + 0.06, P['屋面'], col)
+        # 屋顶机房与电梯井（仅视觉，未计入 solar.py 的遮挡模型）
+        mx = (b['x0'] + b['x1']) / 2
+        add_box(f'{name}_机房', mx - 6, mx + 6, b['y0'] + 3, b['y0'] + 8,
+                roof, roof + 3.2, P['石材'], col)
+        add_box(f'{name}_电梯井', mx + 8, mx + 13, b['y1'] - 7, b['y1'] - 3,
+                roof, roof + 2.4, P['石材'], col)
 
-        # 南立面窗：每户一片
         for ci, ck in enumerate(cols):
             cx0 = b['x0'] + ci * UNIT_W
             for f in floors:
@@ -203,39 +361,57 @@ def build(mode='arch', metric='price'):
                 if not u or u['p'] is None:
                     continue
                 zb = (f - 1) * FLOOR_H
-                x0, x1 = cx0 + 0.75, cx0 + UNIT_W - 0.75
-                z0, z1 = zb + 0.95, zb + 2.55
+                x0, x1 = cx0 + 0.70, cx0 + UNIT_W - 0.70
+                z0, z1 = zb + 0.90, zb + 2.60
                 y = b['y0'] - 0.10
-                # 窗洞深色底
-                add_box(f'{name}_洞_{ci}_{f}', x0 - 0.12, x1 + 0.12, y, b['y0'],
-                        z0 - 0.12, z1 + 0.12, m_frame, col)
+
+                add_box(f'{name}_洞_{ci}_{f}', x0 - 0.14, x1 + 0.14, y, b['y0'],
+                        z0 - 0.14, z1 + 0.14, P['窗框'], col)
                 pane = add_quad(f'{name}_窗_{ci}_{f}',
                                 [(x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1)],
                                 unit_mat(u), col)
                 pane['unit'] = f"{u['b']}|{u['u']}|{u['rm']}|{u['fr']}"
                 pane['price'] = u['p']
                 pane['sun'] = u['s']
-                # 竖向分隔窗框
                 add_box(f'{name}_框_{ci}_{f}', (x0 + x1) / 2 - 0.05, (x0 + x1) / 2 + 0.05,
-                        y - 0.04, b['y0'], z0, z1, m_frame, col)
+                        y - 0.05, b['y0'], z0, z1, P['窗框'], col)
 
-        # 北立面小窗（丰富体量，不参与数据着色）
+                if balconies:
+                    # 阳台：挑板 + 玻璃栏板 + 金属扶手。
+                    # 这是让体量从"写字楼白盒子"变成住宅的关键——改的是轮廓，不是贴图。
+                    bx0, bx1 = cx0 + 0.35, cx0 + UNIT_W - 0.35
+                    by = b['y0'] - 1.55
+                    add_box(f'{name}_阳台板_{ci}_{f}', bx0, bx1, by, b['y0'],
+                            zb + 0.02, zb + 0.20, P['线条'], col)
+                    add_quad(f'{name}_栏板_{ci}_{f}',
+                             [(bx0, by, zb + 0.20), (bx1, by, zb + 0.20),
+                              (bx1, by, zb + 1.28), (bx0, by, zb + 1.28)],
+                             P['栏板'], col)
+                    add_box(f'{name}_扶手_{ci}_{f}', bx0, bx1, by - 0.05, by + 0.05,
+                            zb + 1.28, zb + 1.36, P['金属'], col)
+                    for sx in (bx0, bx1):          # 侧向隔板
+                        add_quad(f'{name}_侧板_{ci}_{f}_{sx:.1f}',
+                                 [(sx, by, zb + 0.20), (sx, b['y0'], zb + 0.20),
+                                  (sx, b['y0'], zb + 1.28), (sx, by, zb + 1.28)],
+                                 P['栏板'], col)
+
         for ci in range(len(cols)):
             cx0 = b['x0'] + ci * UNIT_W
             for f in floors:
                 zb = (f - 1) * FLOOR_H
                 add_quad(f'{name}_北窗_{ci}_{f}',
-                         [(cx0 + 2.2, b['y1'] + 0.08, zb + 1.2),
-                          (cx0 + UNIT_W - 2.2, b['y1'] + 0.08, zb + 1.2),
-                          (cx0 + UNIT_W - 2.2, b['y1'] + 0.08, zb + 2.3),
-                          (cx0 + 2.2, b['y1'] + 0.08, zb + 2.3)],
-                         m_glass, col)
+                         [(cx0 + 2.2, b['y1'] + 0.09, zb + 1.2),
+                          (cx0 + UNIT_W - 2.2, b['y1'] + 0.09, zb + 1.2),
+                          (cx0 + UNIT_W - 2.2, b['y1'] + 0.09, zb + 2.3),
+                          (cx0 + 2.2, b['y1'] + 0.09, zb + 2.3)],
+                         P['玻璃'], col)
 
     return scene
 
 
-def set_sun(az, alt, strength=2.0, angle_deg=0.53):
-    """按方位角/高度角布置太阳，并让天空与之一致。"""
+# ---------------- 光照 ----------------
+def set_sun(az, alt, strength=2.6, angle_deg=0.53, warm=0.0, sky_strength=0.6):
+    """warm∈[0,1]：给低角度阳光加暖色，用于黄昏气氛。"""
     for ob in list(bpy.data.objects):
         if ob.type == 'LIGHT':
             bpy.data.objects.remove(ob, do_unlink=True)
@@ -243,18 +419,19 @@ def set_sun(az, alt, strength=2.0, angle_deg=0.53):
     lamp = bpy.data.lights.new('太阳', type='SUN')
     lamp.energy = strength
     lamp.angle = math.radians(angle_deg)
+    # 暖度曲线放狠一些：低角度阳光实际色温约 3000–3500K，
+    # 而 AgX 会把高光往白里推，所以源头必须给足暖色才看得出冷暖对比。
+    lamp.color = (1.0, 1.0 - 0.30 * warm, 1.0 - 0.60 * warm)
     ob = bpy.data.objects.new('太阳', lamp)
     bpy.context.scene.collection.objects.link(ob)
 
     a, e = math.radians(az), math.radians(alt)
     to_sun = Vector((math.sin(a) * math.cos(e), math.cos(a) * math.cos(e), math.sin(e)))
-    # 瞄点必须与灯位共线：location = aim + to_sun*d，这样 look_at 得到的
-    # 出射方向精确等于 -to_sun。若瞄点偏离灯位所在射线，会引入数度方向误差。
+    # 瞄点必须与灯位共线，否则 look_at 会引入数度方向误差
     aim = Vector((0.0, BUILDINGS['8幢']['y0'], 0.0))
     ob.location = aim + to_sun * 600
     look_at(ob, aim)
 
-    # 世界：Nishita 天空
     world = bpy.data.worlds.get('World') or bpy.data.worlds.new('World')
     bpy.context.scene.world = world
     world.use_nodes = True
@@ -264,34 +441,33 @@ def set_sun(az, alt, strength=2.0, angle_deg=0.53):
     bg = nt.nodes.new('ShaderNodeBackground')
     sky = nt.nodes.new('ShaderNodeTexSky')
     try:
-        # Blender 5.x 把原 NISHITA 改名为 MULTIPLE_SCATTERING，
-        # 枚举为 ('SINGLE_SCATTERING','MULTIPLE_SCATTERING','PREETHAM','HOSEK_WILKIE')
+        # Blender 5.x 把原 NISHITA 改名为 MULTIPLE_SCATTERING
         opts = [i.identifier for i in sky.bl_rna.properties['sky_type'].enum_items]
         sky.sky_type = 'MULTIPLE_SCATTERING' if 'MULTIPLE_SCATTERING' in opts else opts[0]
         sky.sun_elevation = e
-        # Blender 的 sun_rotation 以 +Y(北) 为 0、绕天顶逆时针为正；
-        # 方位角以北为 0、顺时针为正，故取负。
-        sky.sun_rotation = -a
+        sky.sun_rotation = -a          # 方位角以北为0顺时针，sun_rotation 以北为0逆时针
         if hasattr(sky, 'sun_disc'):
             sky.sun_disc = False
-        for attr, val in (('air_density', 1.5), ('dust_density', 2.4), ('ozone_density', 1.0)):
+        for attr, val in (('air_density', 1.6), ('dust_density', 2.6 + 2.0 * warm),
+                          ('ozone_density', 1.2)):
             if hasattr(sky, attr):
                 setattr(sky, attr, val)
     except Exception as err:
         print('天空节点设置降级:', err, file=sys.stderr)
-    bg.inputs['Strength'].default_value = 1.0
+    bg.inputs['Strength'].default_value = sky_strength
     nt.links.new(sky.outputs[0], bg.inputs['Color'])
     nt.links.new(bg.outputs[0], out.inputs['Surface'])
     return ob
 
 
+# ---------------- 相机 ----------------
 def look_at(cam_ob, target, up=(0, 0, 1)):
-    """构造朝向矩阵：相机看向 -Z、局部 X 为右、Y 为上。
-    不能用 rotation_difference —— 它返回最短弧四元数，roll 不受控，会导致地平线倾斜。"""
+    """相机看向 -Z、局部 X 右、Y 上。不能用 rotation_difference：
+    它返回最短弧四元数，roll 不受控，会导致地平线倾斜。"""
     fwd = (Vector(target) - cam_ob.location).normalized()
     upv = Vector(up)
     right = fwd.cross(upv)
-    if right.length < 1e-6:                     # 正俯视时退化，另取一个右向
+    if right.length < 1e-6:
         right = Vector((1, 0, 0))
     right.normalize()
     true_up = right.cross(fwd)
@@ -300,6 +476,24 @@ def look_at(cam_ob, target, up=(0, 0, 1)):
         (right.y, true_up.y, -fwd.y),
         (right.z, true_up.z, -fwd.z),
     )).to_euler()
+
+
+def add_camera(loc, target, lens=45, ortho=None, dof=None):
+    cam = bpy.data.cameras.new('相机')
+    cam.lens = lens
+    if ortho:
+        cam.type = 'ORTHO'
+        cam.ortho_scale = ortho
+    ob = bpy.data.objects.new('相机', cam)
+    ob.location = Vector(loc)
+    bpy.context.scene.collection.objects.link(ob)
+    bpy.context.scene.camera = ob
+    look_at(ob, target)
+    if dof:
+        cam.dof.use_dof = True
+        cam.dof.focus_distance = (Vector(target) - Vector(loc)).length
+        cam.dof.aperture_fstop = dof
+    return ob
 
 
 def site_bbox():
@@ -314,49 +508,32 @@ def site_center():
     return ((x0 + x1) / 2, (y0 + y1) / 2, z1 * 0.45), (x1 - x0, y1 - y0, z1)
 
 
-def fit_camera(direction, lens=50, margin=1.08, target=None, res=(2560, 1440)):
-    """沿 direction（由目标指向相机）放置相机，使场地包围盒 8 个角点全部入画。
-    与网页版同一套思路：斜视角下单纯按尺寸估距会严重取景过近。"""
+def fit_camera(direction, lens=50, margin=1.08, target=None, res=(2560, 1440), dof=None):
+    """沿 direction（目标→相机）放置相机，使场地包围盒 8 角点全部入画。
+    斜视角下单纯按尺寸估距会严重取景过近，必须按角点反算。"""
     x0, x1, y0, y1, z0, z1 = site_bbox()
     tgt = Vector(target) if target else Vector(site_center()[0])
     corners = [Vector((x, y, z)) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
-
-    sensor = 36.0
-    aspect = res[0] / res[1]
-    tan_h = (sensor / 2) / lens
-    tan_v = tan_h / aspect
-
-    fwd = Vector(direction).normalized()          # 目标 → 相机
+    tan_h = (36.0 / 2) / lens
+    tan_v = tan_h / (res[0] / res[1])
+    fwd = Vector(direction).normalized()
     upv = Vector((0, 0, 1))
     right = fwd.cross(upv)
     if right.length < 1e-6:
         right = Vector((1, 0, 0))
     right.normalize()
     true_up = right.cross(fwd)
-
     d = 1.0
     for c in corners:
         v = c - tgt
-        z = v.dot(fwd)
-        d = max(d, z + abs(v.dot(right)) / tan_h, z + abs(v.dot(true_up)) / tan_v)
-    return add_camera(tgt + fwd * d * margin, tgt, lens=lens)
+        d = max(d, v.dot(fwd) + abs(v.dot(right)) / tan_h,
+                v.dot(fwd) + abs(v.dot(true_up)) / tan_v)
+    return add_camera(tgt + fwd * d * margin, tgt, lens=lens, dof=dof)
 
 
-def add_camera(loc, target, lens=45, ortho=None):
-    cam = bpy.data.cameras.new('相机')
-    cam.lens = lens
-    if ortho:
-        cam.type = 'ORTHO'
-        cam.ortho_scale = ortho
-    ob = bpy.data.objects.new('相机', cam)
-    ob.location = Vector(loc)
-    bpy.context.scene.collection.objects.link(ob)
-    bpy.context.scene.camera = ob
-    look_at(ob, target)
-    return ob
-
-
-def setup_render(engine='CYCLES', res=(2560, 1440), samples=128, film_transparent=False):
+# ---------------- 渲染设置 ----------------
+def setup_render(engine='CYCLES', res=(2560, 1440), samples=128,
+                 film_transparent=False, exposure=0.0, contrast='Medium Contrast'):
     sc = bpy.context.scene
     if engine == 'CYCLES':
         try:
@@ -370,13 +547,13 @@ def setup_render(engine='CYCLES', res=(2560, 1440), samples=128, film_transparen
         for d in prefs.devices:
             d.use = (d.type == 'METAL')
         sc.cycles.device = 'GPU'
-        print('[渲染设备] 类型=%s 启用=%s' % (
-            prefs.compute_device_type,
-            [(d.name, d.type) for d in prefs.devices if d.use]))
         sc.cycles.samples = samples
         sc.cycles.use_denoising = True
-        sc.cycles.max_bounces = 6
-        sc.cycles.transmission_bounces = 4
+        sc.cycles.max_bounces = 8
+        sc.cycles.transmission_bounces = 6
+        sc.cycles.glossy_bounces = 6
+        print('[渲染设备] %s %s' % (prefs.compute_device_type,
+                                 [d.name for d in prefs.devices if d.use]))
     else:
         sc.render.engine = 'BLENDER_EEVEE'
         for attr, val in (('taa_render_samples', samples), ('use_raytracing', True),
@@ -388,10 +565,25 @@ def setup_render(engine='CYCLES', res=(2560, 1440), samples=128, film_transparen
     sc.render.film_transparent = film_transparent
     sc.render.image_settings.file_format = 'PNG'
     sc.render.image_settings.color_mode = 'RGBA' if film_transparent else 'RGB'
-    sc.view_settings.view_transform = 'AgX' if 'AgX' in [
-        t.identifier for t in sc.view_settings.bl_rna.properties['view_transform'].enum_items
-    ] else 'Filmic'
-    sc.view_settings.look = 'None'
+    vs = sc.view_settings
+    # 注意：在 --background 下用 bl_rna 内省 view_transform / look 的枚举
+    # 只会返回 ['NONE']（动态枚举的怪癖），据此判断会得出"AgX 不可用"的错误结论。
+    # 正确做法是直接赋值并捕获异常。
+    for cand in ('AgX', 'Filmic', 'Standard'):
+        try:
+            vs.view_transform = cand
+            break
+        except Exception:
+            continue
+    vs.exposure = exposure
+    for cand in (contrast, f'AgX - {contrast}', 'None'):
+        try:
+            vs.look = cand
+            break
+        except Exception:
+            continue
+    print('[色彩管理] view_transform=%s look=%s exposure=%+.2f'
+          % (vs.view_transform, vs.look, vs.exposure))
     return sc
 
 

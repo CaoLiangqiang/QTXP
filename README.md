@@ -10,10 +10,18 @@ GitHub Pages：**https://caoliangqiang.github.io/QTXP/**
 ## 效果图与日照动画
 
 Blender 5.2 + Cycles（Metal GPU）离线渲染，几何由 `.build/units.json` 程序化生成，
-尺度按真实米制（层高 3.0 m、进深 11 m、檐高 28.2 m）。
+尺度按真实米制（层高 3.0 m、进深 11 m、檐高 28.2 m），共 1445 个物体、20 种材质。
+
+**建模内容**：楼体分层、外挑楼板线条、女儿墙、屋顶机房与电梯井、南立面逐户窗与窗框、
+**逐户阳台（挑板 + 玻璃栏板 + 金属扶手 + 侧向隔板）**、非住宅基座、北立面窗；
+场地外有内部铺装、楼间草坪与步道、南北两条市政道路（含车道虚线）、约 70 棵行道树与
+组团树、10 栋邻楼体量——空场地是"假"的最大来源，粗糙的文脉也远胜一块灰板。
 
 | 产物 | 说明 |
 | --- | --- |
+| `renders/10_黄昏鸟瞰.jpg` | 冬至 14:45 真实低角度暖光（高度角 21.4°、西南向），侧逆光 |
+| `renders/11_近景人视.jpg` | 1.9 m 真人视高贴近 11幢 南立面，28 mm + f/6 景深，看阳台细节 |
+| `renders/12_楼间对望.jpg` | 站在 8幢 与 5幢 之间（间距 30 m），看正午阴影切在 5幢 立面上 |
 | `renders/01_东南鸟瞰.jpg` | 冬至正午，东南向鸟瞰 |
 | `renders/02_正午长影.jpg` | 9:15 低角度，长影投向西北 |
 | `renders/03_俯视总平.jpg` | 俯视，看南北三排关系与地面阴影 |
@@ -23,12 +31,17 @@ Blender 5.2 + Cycles（Metal GPU）离线渲染，几何由 `.build/units.json` 
 | `renders/环绕.mp4` | 绕场地一圈（72 帧） |
 | `renders/*.gif` | 上面两个动画的 GIF 版，供 README 内联显示 |
 
+![黄昏鸟瞰](renders/10_黄昏鸟瞰.jpg)
+
 ![冬至日照动画](renders/冬至日照动画.gif)
 
 ![环绕](renders/环绕.gif)
 
 主光源按上海冬至正午的真实太阳位置设置（NOAA 算法，正午高度角 35.33°，
-与解析值 90−31.23−23.44 零偏差），因此画面里的阴影方向和长度都是算出来的，不是摆出来的。
+与解析值 90−31.23−23.44 零偏差），黄昏图用的 14:45 也是时间轴上的真实采样点而非摆拍，
+因此画面里的阴影方向和长度都是算出来的。材质配色刻意做了色相分离
+（暖砂岩立面 ↔ 冷蓝反射玻璃 ↔ 饱和绿景观），玻璃用低粗糙度反射而非透射——
+远景里纯透射只会变成一片黑，反射天空才是窗户"像玻璃"的关键。
 
 ## 文件
 
@@ -144,7 +157,8 @@ python3 .build/build.py        # 输出 前滩尚品_3D可视化.html
 B=/Applications/Blender.app/Contents/MacOS/Blender
 python3 .build/blender/solar.py                                  # 反推楼间距 -> geometry.json
 $B -b --factory-startup --python .build/blender/verify.py        # 数值自检（太阳方向/遮挡/取景）
-$B -b --factory-startup --python .build/blender/stills.py    -- 160 2560
+$B -b --factory-startup --python .build/blender/stills.py    -- 140 2560   # 分析图
+$B -b --factory-startup --python .build/blender/hero.py      -- 180 2560   # 气氛图
 $B -b --factory-startup --python .build/blender/sun_study.py -- 1600 32 1
 $B -b --factory-startup --python .build/blender/turntable.py -- 1280 72 32
 bash .build/blender/encode.sh                                    # 合成 mp4/gif/jpg 到 renders/
