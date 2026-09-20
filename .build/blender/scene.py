@@ -204,47 +204,57 @@ def make_mat(name, color, rough=0.5, metal=0.0, transmit=0.0,
 def palette():
     """一套材质，构建与渲染脚本共用。
 
-    配色的关键不是"好看的灰"，而是**色相分离**：暖砂岩立面 ↔ 冷蓝玻璃 ↔
-    饱和绿景观 ↔ 暖铺装。全是低饱和灰白时，再好的光也救不回来（实测
-    上一版全图平均饱和度只有 3%，几乎是黑白片）。"""
+    配色依据：从售楼处宣传物料照片（`宣传图/`，未入库）用
+    `extract_palette.py` 降采样取 RGB 反推得到，而非凭感觉调的。
+    主要来源与取值见各行注释。
+
+    局限：素材是打印物料的手机翻拍，带印刷色偏与拍摄环境光，
+    所以这些值反映的是**色相关系**（暖立面 ↔ 冷玻璃 ↔ 深绿景观），
+    不是绝对色值。拿到电子版立面图可进一步校正。"""
     p = {}
     p['地面'] = make_mat('地面', hex_rgba('#8a8a6e'), rough=0.95, bump=(6, 0.06))
-    p['铺装'] = make_mat('铺装', hex_rgba('#b5a892'), rough=0.70, bump=(22, 0.10))
-    p['草坪'] = make_mat('草坪', hex_rgba('#4a7a2c'), rough=0.95, bump=(40, 0.22))
+    # 暖铺装：IMG_1889 底部 #ae9971 / #bdaa88 / #a18d6f
+    p['铺装'] = make_mat('铺装', hex_rgba('#b09a78'), rough=0.70, bump=(22, 0.10))
+    # 景观绿：IMG_1889 主色 #487858 / #386848（偏蓝的深绿，
+    # 不是我原先用的黄绿 #4a7a2c —— 这是提取数据纠正的第一处错误）
+    p['草坪'] = make_mat('草坪', hex_rgba('#3f6f50'), rough=0.95, bump=(40, 0.22))
     p['沥青'] = make_mat('沥青', hex_rgba('#35373c'), rough=0.80, bump=(30, 0.08))
-    # 立面：暖砂岩，与冷玻璃形成互补色对比
-    p['外墙'] = make_mat('外墙', hex_rgba('#e6d3ac'), rough=0.56, bump=(9, 0.10))
-    p['外墙深'] = make_mat('外墙深', hex_rgba('#a8876a'), rough=0.60, bump=(9, 0.10))
+    # 立面暖砂岩：IMG_1888 r4 #d3bfa5 / #bfb09c / #beac96，IMG_1887 r2 #b8a798
+    p['外墙'] = make_mat('外墙', hex_rgba('#d3bfa5'), rough=0.56, bump=(9, 0.10))
+    # 深色石材带：IMG_1888 #8c7055 / #a38e77
+    p['外墙深'] = make_mat('外墙深', hex_rgba('#967d62'), rough=0.60, bump=(9, 0.10))
     p['石材'] = make_mat('石材基座', hex_rgba('#6a5c4c'), rough=0.52, bump=(14, 0.14))
-    p['线条'] = make_mat('楼板线条', hex_rgba('#f6efdd'), rough=0.40)
-    # 玻璃：不透射，用低粗糙度深蓝反射面 —— 让它反射天空。
-    # 纯透射在远景里只会变成一片黑，反射才是窗户"像玻璃"的关键。
-    p['玻璃'] = make_mat('玻璃', hex_rgba('#0f2e45'), rough=0.030, metal=0.25, coat=0.6)
-    p['栏板'] = make_mat('玻璃栏板', hex_rgba('#5f8ca6'), rough=0.05, transmit=0.70, coat=0.5)
-    p['金属'] = make_mat('金属', hex_rgba('#3f474d'), rough=0.30, metal=0.9)
-    p['窗框'] = make_mat('窗框', hex_rgba('#23272b'), rough=0.36, metal=0.6)
-    p['女儿墙'] = make_mat('女儿墙', hex_rgba('#d8c4a0'), rough=0.54, bump=(9, 0.08))
+    p['线条'] = make_mat('楼板线条', hex_rgba('#efe4d2'), rough=0.40)
+    # 玻璃：IMG_1887 中右列 #4d545b / #485057 / #56626f / #706a65。
+    # 实际立面玻璃是**中间调蓝灰**，远比我原先的深藏青 #0f2e45 亮得多
+    # —— 这是提取数据纠正的第二处错误，也是此前"太暗太脏"的主因。
+    p['玻璃'] = make_mat('玻璃', hex_rgba('#4f5a63'), rough=0.045, metal=0.30, coat=0.6)
+    p['栏板'] = make_mat('玻璃栏板', hex_rgba('#7d909c'), rough=0.05, transmit=0.70, coat=0.5)
+    p['金属'] = make_mat('金属', hex_rgba('#474d52'), rough=0.30, metal=0.9)
+    p['窗框'] = make_mat('窗框', hex_rgba('#2e3236'), rough=0.36, metal=0.6)
+    p['女儿墙'] = make_mat('女儿墙', hex_rgba('#c9b69c'), rough=0.54, bump=(9, 0.08))
     p['屋面'] = make_mat('屋面', hex_rgba('#4e4f46'), rough=0.85, bump=(18, 0.12))
     p['树干'] = make_mat('树干', hex_rgba('#4a3524'), rough=0.85)
-    p['树冠'] = make_mat('树冠', hex_rgba('#356b22'), rough=0.9, bump=(28, 0.3))
-    p['树冠2'] = make_mat('树冠2', hex_rgba('#5c8a2e'), rough=0.9, bump=(24, 0.3))
+    # 树冠双色：IMG_1889 的绿色区间上下端
+    p['树冠'] = make_mat('树冠', hex_rgba('#356044'), rough=0.9, bump=(28, 0.3))
+    p['树冠2'] = make_mat('树冠2', hex_rgba('#588a5e'), rough=0.9, bump=(24, 0.3))
     p['邻楼'] = make_mat('邻楼', hex_rgba('#b8a894'), rough=0.60)
     p['邻楼2'] = make_mat('邻楼2', hex_rgba('#9a9384'), rough=0.62)
-    p['邻窗'] = make_mat('邻窗', hex_rgba('#1b2f40'), rough=0.10, metal=0.3)
+    p['邻窗'] = make_mat('邻窗', hex_rgba('#48535c'), rough=0.10, metal=0.3)
 
     # --- 逐户差异用的窗面材质 ---
     # 真实住宅楼不存在两扇一样的窗：有的拉着窗帘、有的能看进室内、有的只反天空。
     # 这是让渲染"不像模型"的最大杠杆，比贴图分辨率重要得多。
-    p['窗帘白'] = make_mat('窗帘白', hex_rgba('#d9d2c4'), rough=0.72)
-    p['窗帘暖'] = make_mat('窗帘暖', hex_rgba('#c7b295'), rough=0.74)
-    p['窗帘灰'] = make_mat('窗帘灰', hex_rgba('#9aa0a4'), rough=0.70)
-    p['室内暗'] = make_mat('室内暗', hex_rgba('#151a20'), rough=0.85)
-    p['室内暖'] = make_mat('室内暖', hex_rgba('#2a2420'), rough=0.8,
+    p['窗帘白'] = make_mat('窗帘白', hex_rgba('#ddd6c8'), rough=0.72)
+    p['窗帘暖'] = make_mat('窗帘暖', hex_rgba('#c9b494'), rough=0.74)
+    p['窗帘灰'] = make_mat('窗帘灰', hex_rgba('#a0a6a8'), rough=0.70)
+    p['室内暗'] = make_mat('室内暗', hex_rgba('#1d2226'), rough=0.85)
+    p['室内暖'] = make_mat('室内暖', hex_rgba('#2e2823'), rough=0.8,
                           emit=hex_rgba('#ffc98a'), emit_str=0.25)
-    p['玻璃亮'] = make_mat('玻璃亮', hex_rgba('#173448'), rough=0.020, metal=0.30, coat=0.6)
-    p['玻璃哑'] = make_mat('玻璃哑', hex_rgba('#0b2233'), rough=0.075, metal=0.18, coat=0.4)
-    p['空调'] = make_mat('空调外机', hex_rgba('#c9c6bd'), rough=0.55, metal=0.25)
-    p['阳台地'] = make_mat('阳台地面', hex_rgba('#a89882'), rough=0.62, bump=(30, 0.10))
+    p['玻璃亮'] = make_mat('玻璃亮', hex_rgba('#5d6a74'), rough=0.028, metal=0.34, coat=0.6)
+    p['玻璃哑'] = make_mat('玻璃哑', hex_rgba('#414b53'), rough=0.085, metal=0.20, coat=0.4)
+    p['空调'] = make_mat('空调外机', hex_rgba('#cbc7bd'), rough=0.55, metal=0.25)
+    p['阳台地'] = make_mat('阳台地面', hex_rgba('#ab9a80'), rough=0.62, bump=(30, 0.10))
     return p
 
 
