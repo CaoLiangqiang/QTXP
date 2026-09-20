@@ -8,6 +8,10 @@
 # 验证用截图，按需重新生成即可
 .build/shots/
 
+# Blender 渲染中间产物（PNG 帧序列、测试渲染），成品在 renders/
+.build/renders/
+.build/blender/__pycache__/
+
 # 无头浏览器临时 profile
 .build/**/prof/
 .build/**/p[0-9]/
