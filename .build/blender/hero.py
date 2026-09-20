@@ -28,13 +28,11 @@ S.build(mode='arch', balconies=True, context=True)
 
 SHOTS = [
     # 10 黄昏鸟瞰：相机东南、太阳西南 —— 侧逆光让体量有明暗交界
-    dict(name='10_黄昏鸟瞰', sun=late, warm=0.95, sun_e=3.4, sky=0.50, exposure=0.20,
+    dict(name='10_黄昏鸟瞰', sun=late, warm=1.0, sun_e=4.5, sky=0.26, exposure=-0.28,
          fit=(0.78, -1.00, 0.34), lens=52, dof=None),
-    # 11 近景人视：贴近 11幢 南立面，展示阳台与栏板。
-    # 视高压到 1.9 m（真人视线）并让南侧行道树与草坪进入前景 ——
-    # 近景图缺前景是"假"的另一大来源。
-    dict(name='11_近景人视', sun=late, warm=0.9, sun_e=3.6, sky=0.55, exposure=0.10,
-         loc=(40, -42, 1.9), target=(-10, 4, 17), lens=28, dof=6.0),
+    # 11 近景人视：进入 11幢 南侧前庭，绿篱与草坪作前景，展示圆角檐口和 Y 形框架。
+    dict(name='11_近景人视', sun=late, warm=1.0, sun_e=4.2, sky=0.34, exposure=-0.22,
+         loc=(36, -25, 1.9), target=(-6, 1.5, 11.5), lens=34, dof=7.0),
     # 12 楼间对望：站在 8幢 与 5幢 之间（间距 30 m），看正午阴影切在 5幢 立面上
     dict(name='12_楼间对望', sun=noon, warm=0.15, sun_e=3.0, sky=0.6, exposure=0.0,
          loc=(30, B8['y1'] + 6, 4.2), target=(-12, B5['y0'], 15), lens=32, dof=7.0),
@@ -44,10 +42,23 @@ for s in SHOTS:
     print(f'\n===== {s["name"]}  {s["sun"]["t"]:.2f}时 alt={s["sun"]["alt"]:.1f}° =====')
     S.set_sun(s['sun']['az'], s['sun']['alt'], strength=s['sun_e'],
               warm=s['warm'], sky_strength=s['sky'])
+    # 每张图先恢复树木；人视近景再隐藏相机 15m 内的程序化树。
+    # 这些树适合中远景，贴脸会暴露它是团簇球体，反而比没有前景更假。
+    for ob in bpy.data.objects:
+        if ob.name.startswith(('树冠_', '树干_')):
+            ob.hide_render = False
     if 'fit' in s:
-        S.fit_camera(s['fit'], lens=s['lens'], margin=1.04, res=RES, dof=s['dof'])
+        cam = S.fit_camera(s['fit'], lens=s['lens'], margin=1.04, res=RES, dof=s['dof'])
     else:
-        S.add_camera(s['loc'], s['target'], lens=s['lens'], dof=s['dof'])
+        cam = S.add_camera(s['loc'], s['target'], lens=s['lens'], dof=s['dof'])
+    if s['name'] == '11_近景人视':
+        for ob in bpy.data.objects:
+            if ob.name.startswith(('树冠_', '树干_')):
+                dx, dy = ob.location.x - cam.location.x, ob.location.y - cam.location.y
+                # 南侧市政道路一排树在近景会变成硬切进画面的团簇球；
+                # 全部隐藏，同时兜底隐藏相机 15m 内的树。楼前绿篱仍保留。
+                if ob.location.y < -10 or dx*dx + dy*dy < 15*15:
+                    ob.hide_render = True
     S.setup_render(engine='CYCLES', res=RES, samples=SAMPLES, exposure=s['exposure'])
     S.render_to(OUT / f'{s["name"]}.png')
 

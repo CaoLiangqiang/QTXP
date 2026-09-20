@@ -88,6 +88,61 @@ def add_box(name, x0, x1, y0, y1, z0, z1, mat=None, col=None):
     return ob
 
 
+def add_beveled_box(name, x0, x1, y0, y1, z0, z1, mat=None, col=None,
+                     bevel=0.18, segments=4):
+    """带实体圆角的盒体。用于宣传图里标志性的连续圆角檐口与阳台挑板。
+    Bevel 保留为 modifier（不 apply），后台渲染能直接计算，避免 bpy.ops 上下文依赖。"""
+    ob = add_box(name, x0, x1, y0, y1, z0, z1, mat, col)
+    md = ob.modifiers.new('圆角', 'BEVEL')
+    md.width = bevel
+    md.segments = segments
+    md.limit_method = 'ANGLE'
+    try:
+        md.miter_outer = 'MITER_ARC'
+    except Exception:
+        pass
+    return ob
+
+
+def add_flared_pier(name, x, y0, y1, z0, z1, mat, col, slim=0.09, flare=0.34):
+    """每层一个双端外扩的竖向构件，近似宣传图里的 Y 形 / 拱形 Art Deco 框架。
+    用 9 个截面按 smoothstep 收敛宽度，避免旧版 4 截面形成尖锐"打结"。"""
+    n = 9
+    zs, ws = [], []
+    for i in range(n):
+        t = i / (n - 1)
+        # 离上下端越近越宽；三次 smoothstep 让过渡在端点和中段都没有折角
+        q = abs(t - .5) * 2
+        q = q*q*(3 - 2*q)
+        zs.append(z0 + (z1 - z0) * t)
+        ws.append(slim + (flare - slim) * q)
+    verts = []
+    for yy in (y0, y1):
+        for z, w in zip(zs, ws):
+            verts.extend([(x - w, yy, z), (x + w, yy, z)])
+    faces = []
+    side = 2 * n
+    for base in (0, side):
+        for i in range(n - 1):
+            faces.append((base + 2*i, base + 2*i + 1,
+                          base + 2*i + 3, base + 2*i + 2))
+    for i in range(n - 1):
+        a, b = 2*i, 2*(i+1)
+        faces += [(a, b, side+b, side+a),
+                  (a+1, side+a+1, side+b+1, b+1)]
+    faces += [(0, side, side+1, 1),
+              (2*n-2, 2*n-1, 4*n-1, 4*n-2)]
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.validate(); me.update()
+    ob = bpy.data.objects.new(name, me)
+    ob.data.materials.append(mat)
+    col.objects.link(ob)
+    md = ob.modifiers.new('柔化边缘', 'BEVEL')
+    md.width = 0.025; md.segments = 2
+    return ob
+
+
 def add_quad(name, pts, mat=None, col=None):
     me = bpy.data.meshes.new(name)
     me.from_pydata(pts, [], [(0, 1, 2, 3)])
@@ -114,7 +169,7 @@ def blob_mesh():
     except ReferenceError:
         _BLOB = None
     try:
-        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=1.0)
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=1.0)
         ob = bpy.context.object
         _BLOB = ob.data
         bpy.data.objects.remove(ob, do_unlink=True)
@@ -287,8 +342,28 @@ def add_context(P, col):
             add_box(f'{nm}_线_{k}', cx + k * 11, cx + k * 11 + 4.5,
                     yy - 0.18, yy + 0.18, 0.03, 0.05, P['线条'], col)
 
-    # 行道树与组团树
+    # 行道树与组团树：共享一份平滑球体网格，每棵由 3 个不等高团簇组成，
+    # 避免此前一棵树=一个低面数球的占位符观感。
     bm = blob_mesh()
+    for poly in bm.polygons:
+        poly.use_smooth = True
+
+    # 每栋南侧的精细近景层：大草坪 + 低矮绿篱 + 中轴入口步道。
+    # 宣传图的人视效果几乎没有裸露硬地，前景被草坪和修剪灌木占满。
+    for bi, bn in enumerate(ORDER):
+        bd = BUILDINGS[bn]
+        add_box(f'{bn}_前庭草坪', bd['x0'] - 3, bd['x1'] + 3,
+                bd['y0'] - 9.5, bd['y0'] - 2.0, .03, .11, P['草坪'], col)
+        mid = (bd['x0'] + bd['x1']) / 2
+        add_box(f'{bn}_入口步道', mid - 2.0, mid + 2.0,
+                bd['y0'] - 10.0, bd['y0'] - .2, .11, .17, P['铺装'], col)
+        # 分段绿篱，留出中间入口
+        for hi, (ha, hb) in enumerate(((bd['x0'] - 2.2, mid - 2.8),
+                                        (mid + 2.8, bd['x1'] + 2.2))):
+            if hb > ha:
+                add_beveled_box(f'{bn}_绿篱_{hi}', ha, hb,
+                                bd['y0'] - 2.5, bd['y0'] - 1.65,
+                                .11, .70, P['树冠'], col, bevel=.24, segments=4)
     spots = []
     for yy in (y0 - 24, y1 + 24):
         spots += [(cx + k * 13, yy, 3.4) for k in range(-9, 10)]
@@ -305,9 +380,19 @@ def add_context(P, col):
         s = 1.0 + ((i * 29) % 7 - 3) * 0.07
         add_box(f'树干_{i}', tx + jx - 0.16, tx + jx + 0.16, ty + jy - 0.16, ty + jy + 0.16,
                 0.0, h * 0.42 * s, P['树干'], col)
-        add_instance(f'树冠_{i}', bm, (tx + jx, ty + jy, h * 0.78 * s),
-                     (h * 0.40 * s, h * 0.40 * s, h * 0.46 * s),
-                     P['树冠'] if i % 3 else P['树冠2'], col)
+        # 主冠 + 两个偏置侧冠，既增加轮廓复杂度又保持网格复用
+        crowns = [
+            (0.00,  0.00, .78, .36, .34, .40),
+            (-.19,  .08, .74, .25, .26, .30),
+            (.18,  -.06, .72, .24, .25, .29),
+            (-.05, -.16, .84, .22, .21, .26),
+            (.07,   .14, .88, .20, .19, .24),
+        ]
+        for j, (ox, oy, oz, sx, sy, sz) in enumerate(crowns):
+            add_instance(f'树冠_{i}_{j}', bm,
+                         (tx + jx + ox*h*s, ty + jy + oy*h*s, h*oz*s),
+                         (h*sx*s, h*sy*s, h*sz*s),
+                         P['树冠'] if (i+j) % 3 else P['树冠2'], col)
 
     # 邻楼体量：让场地不悬在虚空里
     neigh = [(-150, -60, 34), (-150, 40, 46), (-150, 130, 30),
@@ -370,27 +455,47 @@ def build(mode='arch', metric='price', balconies=True, context=True):
 
         for f in range(1, GEO['n_storey'] + 1):
             z0, z1 = (f - 1) * FLOOR_H, f * FLOOR_H
-            mat = P['石材'] if f < min_f else (P['外墙'] if f % 2 else P['外墙深'])
-            add_box(f'{name}_体_{f}', b['x0'], b['x1'], b['y0'], b['y1'], z0, z1, mat, col)
-            # 楼板线条：只向南北外挑（东西外扩会让山墙侧变成台阶状轮廓）
-            add_box(f'{name}_线_{f}', b['x0'], b['x1'],
-                    b['y0'] - 0.30, b['y1'] + 0.30, z1 - 0.22, z1, P['线条'], col)
+            if f < min_f:
+                # 宣传图底层是通透架空层，而不是一堵实心墙：后部暗盒 + 前玻璃 + 纤细立柱
+                add_box(f'{name}_底层后部_{f}', b['x0'], b['x1'], b['y0'] + 3.0, b['y1'],
+                        z0, z1, P['石材'], col)
+                add_quad(f'{name}_底层玻璃_{f}',
+                         [(b['x0'] + .5, b['y0'] - .08, z0 + .3),
+                          (b['x1'] - .5, b['y0'] - .08, z0 + .3),
+                          (b['x1'] - .5, b['y0'] - .08, z1 - .25),
+                          (b['x0'] + .5, b['y0'] - .08, z1 - .25)], P['玻璃亮'], col)
+                for k in range(len(cols) + 1):
+                    px = b['x0'] + k * UNIT_W
+                    add_beveled_box(f'{name}_底层柱_{f}_{k}', px - .18, px + .18,
+                                    b['y0'] - .35, b['y0'] + .45, z0, z1,
+                                    P['线条'], col, bevel=.10, segments=3)
+            else:
+                mat = P['外墙'] if f % 2 else P['外墙深']
+                add_box(f'{name}_体_{f}', b['x0'], b['x1'], b['y0'], b['y1'], z0, z1, mat, col)
+
+            # 宣传图最强的形态语言：每层连续的圆角挑檐。南立面突出、四角圆润；
+            # 北面另加较窄的水平带，避免整圈做成夸张胶囊形。
+            add_beveled_box(f'{name}_南檐_{f}', b['x0'] - .18, b['x1'] + .18,
+                            b['y0'] - .72, b['y0'] + .16, z1 - .24, z1 + .04,
+                            P['线条'], col, bevel=.22, segments=5)
+            add_box(f'{name}_北檐_{f}', b['x0'], b['x1'],
+                    b['y1'] - .10, b['y1'] + .28, z1 - .20, z1, P['线条'], col)
 
         add_box(f'{name}_女儿墙', b['x0'] - 0.12, b['x1'] + 0.12,
                 b['y0'] - 0.12, b['y1'] + 0.12, roof, roof + GEO['parapet'], P['女儿墙'], col)
 
-        # 竖向壁柱：在单元分界处通高，打断过长的水平立面，也是住宅立面的常见手法
-        seen_u = []
-        for ck in cols:
-            if ck[0] not in seen_u:
-                seen_u.append(ck[0])
-        n_per_u = max(1, len(cols) // max(1, len(seen_u)))
-        for k in range(len(seen_u) + 1):
-            px = b['x0'] + k * n_per_u * UNIT_W
-            px = min(max(px, b['x0']), b['x1'])
-            add_box(f'{name}_壁柱_{k}', px - 0.36, px + 0.36,
-                    b['y0'] - 0.55, b['y0'] + 0.1, 0, roof + GEO['parapet'],
-                    P['外墙深'], col)
+        # 宣传图的 Y 形 / 拱形构架：每个房号边界、每一层都做"中段细、上下外扩"。
+        # 连续叠起来后形成纵向节奏和拱形框，不再是普通方柱。
+        for f in floors:
+            z0, z1 = (f - 1) * FLOOR_H + .12, f * FLOOR_H - .12
+            for k in range(len(cols) + 1):
+                px = b['x0'] + k * UNIT_W
+                edge = (k == 0 or k == len(cols))
+                add_flared_pier(f'{name}_拱架_{f}_{k}', px,
+                                b['y0'] - 1.78, b['y0'] - 1.30,
+                                z0, z1, P['线条'], col,
+                                slim=.085 if edge else .060,
+                                flare=.34 if edge else .235)
         add_box(f'{name}_屋面', b['x0'], b['x1'], b['y0'], b['y1'],
                 roof - 0.05, roof + 0.06, P['屋面'], col)
         # 屋顶机房与电梯井（仅视觉，未计入 solar.py 的遮挡模型）
@@ -457,21 +562,30 @@ def build(mode='arch', metric='price', balconies=True, context=True):
                     # 改的是轮廓，这是让体量从"写字楼白盒子"变成住宅的关键。
                     bx0, bx1 = cx0 + 0.35, cx0 + UNIT_W - 0.35
                     by = b['y0'] - 1.55
-                    add_box(f'{name}_阳台板_{ci}_{f}', bx0, bx1, by, b['y0'],
-                            zb + 0.02, zb + 0.18, P['线条'], col)
-                    add_box(f'{name}_阳台地_{ci}_{f}', bx0 + 0.04, bx1 - 0.04,
-                            by + 0.04, b['y0'], zb + 0.18, zb + 0.21, P['阳台地'], col)
+                    add_beveled_box(f'{name}_阳台板_{ci}_{f}', bx0, bx1, by, b['y0'],
+                                    zb + 0.02, zb + 0.18, P['线条'], col,
+                                    bevel=.16, segments=5)
+                    add_box(f'{name}_阳台地_{ci}_{f}', bx0 + 0.09, bx1 - 0.09,
+                            by + 0.09, b['y0'], zb + 0.18, zb + 0.21, P['阳台地'], col)
                     add_quad(f'{name}_栏板_{ci}_{f}',
-                             [(bx0, by, zb + 0.21), (bx1, by, zb + 0.21),
-                              (bx1, by, zb + 1.28), (bx0, by, zb + 1.28)],
+                             [(bx0 + .12, by, zb + 0.21), (bx1 - .12, by, zb + 0.21),
+                              (bx1 - .12, by, zb + 1.28), (bx0 + .12, by, zb + 1.28)],
                              P['栏板'], col)
-                    add_box(f'{name}_扶手_{ci}_{f}', bx0, bx1, by - 0.05, by + 0.05,
-                            zb + 1.28, zb + 1.36, P['金属'], col)
+                    add_beveled_box(f'{name}_扶手_{ci}_{f}', bx0, bx1, by - 0.05, by + 0.05,
+                                    zb + 1.28, zb + 1.36, P['金属'], col,
+                                    bevel=.035, segments=3)
                     for sx in (bx0, bx1):
                         add_quad(f'{name}_侧板_{ci}_{f}_{sx:.1f}',
-                                 [(sx, by, zb + 0.21), (sx, b['y0'], zb + 0.21),
-                                  (sx, b['y0'], zb + 1.28), (sx, by, zb + 1.28)],
+                                 [(sx, by + .12, zb + 0.21), (sx, b['y0'], zb + 0.21),
+                                  (sx, b['y0'], zb + 1.28), (sx, by + .12, zb + 1.28)],
                                  P['栏板'], col)
+                    # 宣传图低区阳台有细密竖向金属格栅；上层少量加入，避免每户都一模一样
+                    if f <= 3 or rnd(key, 4) > .78:
+                        for q in range(8):
+                            gx = bx0 + .28 + q * (bx1 - bx0 - .56) / 7
+                            add_box(f'{name}_格栅_{ci}_{f}_{q}', gx - .022, gx + .022,
+                                    by - .025, by + .03, zb + .23, zb + 1.24,
+                                    P['金属'], col)
                     # 空调外机：国内住宅立面最典型的"生活痕迹"，位置左右随户而异
                     if rnd(key, 1) > 0.22:
                         side = rnd(key, 2) > 0.5
@@ -490,6 +604,22 @@ def build(mode='arch', metric='price', balconies=True, context=True):
                           (cx0 + UNIT_W - 2.2, b['y1'] + 0.09, zb + 2.3),
                           (cx0 + 2.2, b['y1'] + 0.09, zb + 2.3)],
                          P['玻璃'], col)
+
+        # 宣传图转角是弧形落地玻璃而非整片白山墙。
+        # 这里先用两侧 4.2m 宽的包角玻璃近似；圆角挑檐负责把轮廓软化。
+        for side, sx in (('西', b['x0'] - .09), ('东', b['x1'] + .09)):
+            for f in floors:
+                zb = (f - 1) * FLOOR_H
+                q = [(sx, b['y0'] + .55, zb + .90),
+                     (sx, b['y0'] + 4.75, zb + .90),
+                     (sx, b['y0'] + 4.75, zb + 2.60),
+                     (sx, b['y0'] + .55, zb + 2.60)]
+                if side == '东':
+                    q.reverse()
+                add_quad(f'{name}_{side}转角窗_{f}', q, P['玻璃亮'], col)
+                add_box(f'{name}_{side}转角框_{f}', sx - .04, sx + .04,
+                        b['y0'] + 2.60, b['y0'] + 2.69,
+                        zb + .90, zb + 2.60, P['窗框'], col)
 
     return scene
 
