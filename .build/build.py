@@ -8,6 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 B = ROOT / '.build'
 OUT = ROOT / '前滩尚品_3D可视化.html'
+# GitHub Pages 用：与上面字节完全相同，因此 git 按内容哈希去重，不额外占体积
+PAGE = ROOT / 'index.html'
 
 tpl = (B / 'viz.tpl.html').read_text(encoding='utf-8')
 parts = {
@@ -22,4 +24,5 @@ for token, f in parts.items():
     tpl = tpl.replace(token, f.read_text(encoding='utf-8'))
 
 OUT.write_text(tpl, encoding='utf-8')
-print(f'已生成 {OUT.name}  {OUT.stat().st_size/1024:.0f} KB')
+PAGE.write_text(tpl, encoding='utf-8')
+print(f'已生成 {OUT.name} 与 {PAGE.name}  各 {OUT.stat().st_size/1024:.0f} KB')
