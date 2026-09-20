@@ -13,6 +13,7 @@ tpl = (B / 'viz.tpl.html').read_text(encoding='utf-8')
 parts = {
     '/*__THREE__*/': B / 'three.min.js',
     '/*__ORBIT__*/': B / 'OrbitControls.js',
+    '/*__XLSX__*/':  B / 'xlsx.js',
     '/*__DATA__*/':  B / 'units.json',
 }
 for token, f in parts.items():

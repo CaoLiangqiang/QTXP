@@ -143,14 +143,24 @@
     background:var(--panel);backdrop-filter:blur(16px);border:1px solid var(--line);
     border-radius:14px;box-shadow:0 18px 54px rgba(0,0,0,.6);overflow:hidden;z-index:8}
   #cmp.show{display:flex;flex-direction:column}
-  .cmpHead{display:flex;align-items:center;gap:10px;padding:11px 14px;
-    border-bottom:1px solid var(--line)}
+  .cmpHead{display:flex;align-items:center;gap:8px;padding:11px 14px;
+    border-bottom:1px solid var(--line);position:relative;flex-wrap:wrap}
   .cmpHead b{font-size:13.5px}
-  .cmpHead .meta{font-size:11.5px;color:var(--dim);flex:1}
+  .cmpHead .meta{font-size:11.5px;color:var(--dim);flex:1;min-width:120px}
   .cmpHead button{padding:5px 10px;cursor:pointer;font:600 11.5px/1.2 inherit;
     color:var(--dim);background:rgba(255,255,255,.05);border:1px solid var(--line);
-    border-radius:7px}
+    border-radius:7px;white-space:nowrap}
   .cmpHead button:hover{color:var(--txt);background:rgba(255,255,255,.12)}
+  .cmpHead button.on{color:#0e1116;background:var(--accent);border-color:var(--accent)}
+
+  #cmpFields{position:absolute;top:42px;left:96px;z-index:3;display:none;
+    min-width:192px;padding:10px 12px;border-radius:11px;background:#161c25;
+    border:1px solid var(--line);box-shadow:0 16px 40px rgba(0,0,0,.65)}
+  #cmpFields.show{display:block}
+  #cmpFields .fh{display:flex;justify-content:space-between;align-items:center;gap:8px;
+    font-size:11px;font-weight:700;color:var(--dim);letter-spacing:1px;margin-bottom:7px;
+    padding-bottom:7px;border-bottom:1px solid var(--line)}
+  #cmpFields .fh button{padding:2px 7px;font-size:10.5px}
   .cmpBody{overflow:auto;padding:4px 0}
   #cmpTable{border-collapse:collapse;font-size:12px;width:100%}
   #cmpTable th,#cmpTable td{padding:6px 10px;text-align:right;white-space:nowrap;
@@ -253,10 +263,14 @@
 <div id="cmp">
   <div class="cmpHead">
     <b>意向房源对比</b>
+    <button id="cmpFieldBtn">字段</button>
     <span class="meta" id="cmpMeta"></span>
-    <button id="cmpLink">复制分享链接</button>
-    <button id="cmpCopy">复制为表格</button>
+    <button id="cmpXlsx">导出 Excel</button>
+    <button id="cmpHtml">导出 HTML</button>
+    <button id="cmpCopy">复制表格</button>
+    <button id="cmpLink">分享链接</button>
     <button id="cmpClose">关闭</button>
+    <div id="cmpFields"></div>
   </div>
   <div class="cmpBody"><table id="cmpTable"></table></div>
 </div>
@@ -265,6 +279,7 @@
 
 <script>/*__THREE__*/</script>
 <script>/*__ORBIT__*/</script>
+<script>/*__XLSX__*/</script>
 <script>const RAW=/*__DATA__*/;</script>
 <script>
 (function(){
@@ -349,6 +364,11 @@ function colorOf(d, mode){
 const fmtI = function(n){ return Math.round(n).toLocaleString('zh-CN'); };
 const fmt2 = function(n){ return n.toLocaleString('zh-CN',{minimumFractionDigits:2, maximumFractionDigits:2}); };
 const fmtD = function(d){ return d == null ? '—' : (d >= 0 ? '↑' : '↓') + fmtI(Math.abs(d)); };
+
+/* 门牌房号 = 名义楼层 + 室号（开发商跳过「4」层，门牌按名义层编）
+   例：5幢 9号 实际4层 02室 → 名义5层 → 「5幢 9号502室」 */
+const doorNo = function(d){ return d.fn + d.rm.replace('室', '') + '室'; };
+const fullNo = function(d){ return d.b + ' ' + d.u + doorNo(d); };
 
 /* ================= 场景 =================
    单套盒子 3.35(东西) × 1.55(层高) × 4.0(进深)；ZGAP 为南北楼间距（示意） */
@@ -629,8 +649,7 @@ function applyStyle(){
 function tipHTML(d){
   const rk = rankOf(d);
   return '<div class="t">' + (rk ? '<span style="color:' + rankColor(rk) + '">第' + rk + '意向 · </span>' : '') +
-    d.b + ' ' + d.u + ' ' + d.rm + '　' + d.fr +
-    '层<span style="color:#8b96a6">(名义' + d.fn + '层)</span></div>' +
+    fullNo(d) + '　<span style="color:#8b96a6">实际' + d.fr + '层 · ' + d.rm + '</span></div>' +
     '<div class="p">' + fmtI(d.p) + ' 元/m²　总价 ' + fmt2(d.t) + ' 万</div>' +
     '<div class="s">' + fmt2(d.a) + ' m²　楼层价差 ' + fmtD(d.d) + '　日照 ' + d.s + ' 小时</div>';
 }
@@ -782,7 +801,7 @@ function renderChips(){
       const d = cell.get(k);
       return '<span class="chip" data-k="' + k + '" title="点击定位，✕ 移出">' +
         '<i style="background:' + rankColor(i+1) + '">' + (i+1) + '</i>' +
-        d.b + ' ' + d.u.replace('号','') + '-' + d.rm.replace('室','') + ' · ' + d.fr + '层' +
+        fullNo(d) +
         '<em class="x">✕</em></span>';
     }).join('');
   }
@@ -811,41 +830,78 @@ document.getElementById('wClear').onclick = function(){
 
 /* ---- 意向范围内对比 ---- */
 const CMP_ROWS = [
-  {k:'单价 元/m²',    v:function(d){ return d.p; },                 f:fmtI, best:'min'},
-  {k:'总价 万元',     v:function(d){ return d.t; },                 f:fmt2, best:'min'},
-  {k:'98折参考 万元',  v:function(d){ return d.t*0.98; },            f:fmt2, best:'min'},
-  {k:'建筑面积 m²',   v:function(d){ return d.a; },                 f:fmt2, best:'max'},
-  {k:'日照 小时',     v:function(d){ return d.s; },                 f:function(x){ return x + ' h'; }, best:'max'},
-  {k:'vs 本期均价',   v:function(d){ return d.p/PROJ_AVG - 1; },
+  {k:'房号',          txt:function(d){ return fullNo(d); }},
+  {k:'单价 元/m²',     v:function(d){ return d.p; },      f:fmtI, best:'min', num:true},
+  {k:'总价 万元',      v:function(d){ return d.t; },      f:fmt2, best:'min', num:true},
+  {k:'98折参考 万元',   v:function(d){ return d.t*0.98; }, f:fmt2, best:'min', num:true},
+  {k:'建筑面积 m²',    v:function(d){ return d.a; },      f:fmt2, best:'max', num:true},
+  {k:'日照 小时',      v:function(d){ return d.s; },      f:function(x){ return x + ' h'; },
+   best:'max', num:true},
+  {k:'vs 本期均价',    v:function(d){ return d.p/PROJ_AVG - 1; },
    f:function(x){ return (x >= 0 ? '+' : '') + (x*100).toFixed(1) + '%'; }, best:'min'},
-  {k:'实际 / 名义层',  txt:function(d){ return d.fr + ' / ' + d.fn + ' 层'; }},
-  {k:'场地位置',      txt:function(d){
+  {k:'实际 / 名义层',   txt:function(d){ return d.fr + ' / ' + d.fn + ' 层'; }, sep:true},
+  {k:'户位',          txt:function(d){ return d.rm; }},
+  {k:'场地位置',       txt:function(d){
      const i = ROWS.indexOf(bmap.get(d.b));
      return i === 0 ? '最南' : (i === ROWS.length - 1 ? '最北' : '中'); }},
-  {k:'楼层单价差',    txt:function(d){ return fmtD(d.d); }},
-  {k:'整列均价',      txt:function(d){ return fmtI(colAvgOf.get(keyOf(d))); }}
+  {k:'楼层单价差',     txt:function(d){ return fmtD(d.d); }},
+  {k:'整列均价',       v:function(d){ return colAvgOf.get(keyOf(d)); }, f:fmtI, num:true}
 ];
+
+const HIDE_KEY = 'qtsp.cmpHide.v1';
+let cmpHide = new Set();
+try{
+  const h = JSON.parse(localStorage.getItem(HIDE_KEY) || '[]');
+  if(Array.isArray(h)) cmpHide = new Set(h);
+}catch(err){}
+function saveHide(){
+  try{ localStorage.setItem(HIDE_KEY, JSON.stringify(Array.from(cmpHide))); }catch(err){}
+}
+
+/* 表格数据模型：渲染与三种导出共用同一份，避免屏幕与导出内容不一致 */
+function cmpModel(){
+  const ds = wish.map(function(k){ return cell.get(k); }).filter(function(x){ return x; });
+  const rows = CMP_ROWS.filter(function(r){ return !cmpHide.has(r.k); }).map(function(r){
+    const vals = r.v ? ds.map(r.v) : null;
+    let best = null;
+    if(vals && r.best && ds.length > 1){
+      best = r.best === 'min' ? Math.min.apply(null, vals) : Math.max.apply(null, vals);
+    }
+    return {
+      k:r.k, num:!!r.num, sep:!!r.sep,
+      cells: ds.map(function(d, i){
+        return {
+          txt: r.v ? r.f(vals[i]) : r.txt(d),
+          raw: vals ? vals[i] : null,
+          best: best !== null && Math.abs(vals[i] - best) < 1e-9
+        };
+      })
+    };
+  });
+  return {ds:ds, rows:rows};
+}
 
 function setCmp(v){
   cmpOpen = !!v && wish.length > 0;
   document.getElementById('cmp').classList.toggle('show', cmpOpen);
   document.getElementById('wCmp').classList.toggle('on', cmpOpen);
-  if(cmpOpen) renderCmp();
+  if(cmpOpen) renderCmp(); else showFields(false);
 }
 function renderCmp(){
   const t = document.getElementById('cmpTable');
-  const ds = wish.map(function(k){ return cell.get(k); }).filter(function(x){ return x; });
-  document.getElementById('cmpMeta').textContent =
-    ds.length ? ds.length + ' 套 · 金色 = 该指标在意向范围内最优' : '';
-  if(!ds.length){ t.innerHTML = '<tr><th class="k">暂无意向房源</th></tr>'; return; }
+  const m = cmpModel();
+  document.getElementById('cmpMeta').textContent = m.ds.length
+    ? m.ds.length + ' 套 · ' + m.rows.length + '/' + CMP_ROWS.length + ' 项字段 · 金色 = 范围内最优'
+    : '';
+  if(!m.ds.length){ t.innerHTML = '<tr><th class="k">暂无意向房源</th></tr>'; return; }
 
   let head = '<thead><tr><th class="k">指标</th>';
-  ds.forEach(function(d, i){
+  m.ds.forEach(function(d, i){
     const k = keyOf(d);
     head += '<th data-k="' + k + '" title="点击定位该房源">' +
       '<span class="rk" style="background:' + rankColor(i+1) + '">' + (i+1) + '</span>' +
-      d.b + ' ' + d.u + d.rm +
-      '<div style="font-weight:500;color:#8b96a6;font-size:11px;margin-top:2px">' + d.fr + '层　' +
+      fullNo(d) +
+      '<div style="font-weight:500;color:#8b96a6;font-size:11px;margin-top:2px">实际' + d.fr + '层　' +
       '<button class="mv" data-mv="-1" data-k="' + k + '" title="升一名">▲</button>' +
       '<button class="mv" data-mv="1" data-k="' + k + '" title="降一名">▼</button>' +
       '<button class="mv" data-rm="' + k + '" title="移出">✕</button></div></th>';
@@ -853,17 +909,10 @@ function renderCmp(){
   head += '</tr></thead>';
 
   let body = '<tbody>';
-  CMP_ROWS.forEach(function(r, ri){
-    const vals = r.v ? ds.map(r.v) : null;
-    let bestVal = null;
-    if(vals && r.best && ds.length > 1){
-      bestVal = r.best === 'min' ? Math.min.apply(null, vals) : Math.max.apply(null, vals);
-    }
-    body += '<tr' + (ri === 5 ? ' class="sep"' : '') + '><th class="k">' + r.k + '</th>';
-    ds.forEach(function(d, i){
-      const isBest = bestVal !== null && Math.abs(vals[i] - bestVal) < 1e-9;
-      body += '<td class="' + (isBest ? 'best' : '') + '">' +
-        (r.v ? r.f(vals[i]) : r.txt(d)) + '</td>';
+  m.rows.forEach(function(r){
+    body += '<tr' + (r.sep ? ' class="sep"' : '') + '><th class="k">' + r.k + '</th>';
+    r.cells.forEach(function(c){
+      body += '<td class="' + (c.best ? 'best' : '') + '">' + c.txt + '</td>';
     });
     body += '</tr>';
   });
@@ -884,19 +933,145 @@ document.getElementById('cmpTable').onclick = function(e){
   }
 };
 document.getElementById('cmpClose').onclick = function(){ setCmp(false); };
+
+/* ---- 字段显示/隐藏 ---- */
+function renderFields(){
+  const box = document.getElementById('cmpFields');
+  box.innerHTML = '<div class="fh"><span>显示字段</span>' +
+    '<span><button data-all="1">全选</button> <button data-all="0">全不选</button></span></div>' +
+    CMP_ROWS.map(function(r){
+      return '<label class="chk"><input type="checkbox" data-f="' + r.k + '"' +
+        (cmpHide.has(r.k) ? '' : ' checked') + '> ' + r.k + '</label>';
+    }).join('');
+}
+function showFields(v){
+  document.getElementById('cmpFields').classList.toggle('show', !!v);
+  document.getElementById('cmpFieldBtn').classList.toggle('on', !!v);
+}
+document.getElementById('cmpFieldBtn').onclick = function(e){
+  e.stopPropagation();
+  const showing = document.getElementById('cmpFields').classList.contains('show');
+  if(!showing) renderFields();
+  showFields(!showing);
+};
+document.getElementById('cmpFields').onclick = function(e){
+  e.stopPropagation();
+  const all = e.target.closest('button[data-all]');
+  if(all){
+    cmpHide = all.dataset.all === '1'
+      ? new Set()
+      : new Set(CMP_ROWS.map(function(r){ return r.k; }));
+    saveHide(); renderFields(); renderCmp();
+    return;
+  }
+  const box = e.target.closest('input[data-f]');
+  if(box){
+    if(box.checked) cmpHide.delete(box.dataset.f); else cmpHide.add(box.dataset.f);
+    saveHide(); renderCmp();
+  }
+};
+addEventListener('click', function(){ showFields(false); });
+
+/* ---- 导出 ---- */
+function stamp(){
+  const d = new Date(), p = function(n){ return ('0' + n).slice(-2); };
+  return '' + d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) +
+    '_' + p(d.getHours()) + p(d.getMinutes());
+}
+function download(name, blob){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+}
+function flash(btn, txt){
+  const old = btn.textContent;
+  btn.textContent = txt;
+  setTimeout(function(){ btn.textContent = old; }, 1600);
+}
+const SRC_NOTE = '数据来源：小胖看房团一房一价表（根据公示规划图纸测算），仅供参考，以实际交付与官方公示为准';
+
+document.getElementById('cmpXlsx').onclick = function(){
+  const m = cmpModel();
+  if(!m.ds.length) return;
+  const rows = [[{v:'指标', b:true}].concat(m.ds.map(function(d, i){
+    return {v:(i+1) + '. ' + fullNo(d), b:true};
+  }))];
+  m.rows.forEach(function(r){
+    rows.push([{v:r.k, b:true}].concat(r.cells.map(function(c){
+      // 数值列取 2 位小数，避免 0.98 相乘产生的浮点尾数进到表里
+      return (r.num && c.raw !== null) ? {n:Math.round(c.raw * 100) / 100} : {v:c.txt};
+    })));
+  });
+  rows.push([]);
+  rows.push([{v:'导出时间', b:true}, new Date().toLocaleString('zh-CN')]);
+  rows.push([{v:'说明', b:true}, SRC_NOTE]);
+  download('前滩尚品_意向对比_' + stamp() + '.xlsx',
+    new Blob([miniXlsx('意向对比', rows)],
+      {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  flash(this, '已导出 ✓');
+};
+
+document.getElementById('cmpHtml').onclick = function(){
+  const m = cmpModel();
+  if(!m.ds.length) return;
+  const esc = function(s){
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  };
+  let h = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>前滩尚品 · 意向房源对比</title><style>' +
+    'body{margin:0;padding:28px;background:#f6f7f9;color:#1b2029;' +
+    'font:14px/1.6 "PingFang SC","Microsoft YaHei",system-ui,sans-serif}' +
+    'h1{margin:0 0 6px;font-size:20px}' +
+    '.meta{margin:0 0 18px;font-size:12.5px;color:#6b7480}' +
+    'table{border-collapse:collapse;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.09);' +
+    'border-radius:8px;overflow:hidden;font-variant-numeric:tabular-nums}' +
+    'th,td{padding:8px 14px;text-align:right;border-bottom:1px solid #eceef1;white-space:nowrap}' +
+    'th.k{text-align:left;color:#6b7480;font-weight:600;background:#fafbfc}' +
+    'thead th{background:#eef1f5;font-size:13px}' +
+    'td.best{background:#fff5da;color:#9a6b00;font-weight:700}' +
+    '.rk{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;' +
+    'font-size:11px;font-weight:800;color:#111;margin-right:5px}' +
+    '.note{margin-top:16px;font-size:12px;color:#8b93a0}' +
+    '@media print{body{padding:0;background:#fff}table{box-shadow:none}}' +
+    '</style></head><body>' +
+    '<h1>前滩尚品 · 意向房源对比</h1>' +
+    '<p class="meta">共 ' + m.ds.length + ' 套 &nbsp;·&nbsp; 导出时间 ' +
+    new Date().toLocaleString('zh-CN') + ' &nbsp;·&nbsp; 金色 = 该指标在意向范围内最优</p><table><thead><tr><th class="k">指标</th>';
+  m.ds.forEach(function(d, i){
+    h += '<th><span class="rk" style="background:' + rankColor(i+1) + '">' + (i+1) + '</span>' +
+      esc(fullNo(d)) + '<br><span style="font-weight:500;color:#6b7480;font-size:11.5px">实际' +
+      d.fr + '层</span></th>';
+  });
+  h += '</tr></thead><tbody>';
+  m.rows.forEach(function(r){
+    h += '<tr><th class="k">' + esc(r.k) + '</th>';
+    r.cells.forEach(function(c){
+      h += '<td' + (c.best ? ' class="best"' : '') + '>' + esc(c.txt) + '</td>';
+    });
+    h += '</tr>';
+  });
+  h += '</tbody></table><p class="note">' + esc(SRC_NOTE) + '</p></body></html>';
+  download('前滩尚品_意向对比_' + stamp() + '.html', new Blob([h], {type:'text/html;charset=utf-8'}));
+  flash(this, '已导出 ✓');
+};
+
 document.getElementById('cmpCopy').onclick = function(){
-  const rows = Array.prototype.map.call(
-    document.getElementById('cmpTable').querySelectorAll('tr'),
-    function(tr){
-      return Array.prototype.map.call(tr.children, function(c){
-        return c.innerText.replace(/[▲▼✕]/g, '').replace(/\s+/g, ' ').trim();
-      }).join('\t');
-    }).join('\n');
-  const btn = document.getElementById('cmpCopy'), old = btn.textContent;
-  (navigator.clipboard ? navigator.clipboard.writeText(rows) : Promise.reject())
-    .then(function(){ btn.textContent = '已复制 ✓'; })
-    .catch(function(){ btn.textContent = '复制失败'; })
-    .then(function(){ setTimeout(function(){ btn.textContent = old; }, 1500); });
+  const m = cmpModel();
+  if(!m.ds.length) return;
+  const lines = [['指标'].concat(m.ds.map(function(d, i){
+    return (i+1) + '. ' + fullNo(d) + '（实际' + d.fr + '层）';
+  })).join('\t')];
+  m.rows.forEach(function(r){
+    lines.push([r.k].concat(r.cells.map(function(c){ return c.txt; })).join('\t'));
+  });
+  const btn = this;
+  (navigator.clipboard ? navigator.clipboard.writeText(lines.join('\n')) : Promise.reject())
+    .then(function(){ flash(btn, '已复制 ✓'); })
+    .catch(function(){ flash(btn, '复制失败'); });
 };
 
 /* ================= 面板 ================= */
@@ -946,9 +1121,9 @@ function colBars(B){
 }
 
 const FLAGS = [
-  {k:'5幢|9号|01室|9',  t:'<b>5幢 9号01室 9层</b>：单价 106,150、价差 −3,633，同层其余三户均为 −3,100'},
-  {k:'8幢|22号|01室|1', t:'<b>8幢 22号01室 1层</b>：88.73m² 小户型单价 97,696，高于 2 层的 95,784'},
-  {k:'11幢|29号|01室|8', t:'<b>11幢 8层</b>：29号01室 110,365 与 28/27号 110,366 存在 1 元尾差'}
+  {k:'5幢|9号|01室|9',  t:'<b>5幢 9号1001室</b>（实际9层）：单价 106,150、价差 −3,633，同层其余三户均为 −3,100'},
+  {k:'8幢|22号|01室|1', t:'<b>8幢 22号101室</b>：88.73m² 小户型单价 97,696，高于 2 层的 95,784'},
+  {k:'11幢|29号|01室|8', t:'<b>11幢 29号901室</b>：110,365 与同层 28/27号 110,366 存在 1 元尾差'}
 ];
 
 function renderInfo(){
@@ -999,7 +1174,7 @@ function renderInfo(){
   const bi = ROWS.indexOf(B);
   const posTxt = bi === 0 ? '最南' : (bi === ROWS.length - 1 ? '最北' : '中');
   const rk = rankOf(d);
-  box.innerHTML = '<span class="tag">' + d.b + ' · ' + d.u + ' · ' + d.rm + '</span>' +
+  box.innerHTML = '<span class="tag">' + fullNo(d) + '</span>' +
     '<div class="big">' + fmtI(d.p) + ' <span style="font-size:12px;color:#8b96a6">元/m²</span></div>' +
     '<div class="sub" style="margin-bottom:8px">总价 <b style="color:#e8ecf2">' + fmt2(d.t) +
     ' 万</b>　·　98折参考 ' + fmt2(d.t*0.98) + ' 万</div>' +
@@ -1012,9 +1187,11 @@ function renderInfo(){
       '<button data-mv="1"' + (rk === wish.length ? ' disabled style="opacity:.4"' : '') + '>▼ 降一名</button>' +
       '</div>' : '') +
     '<div style="margin-top:8px"></div>' +
+    '<div class="kv"><span>房号</span><b>' + d.u + doorNo(d) + '</b></div>' +
+    '<div class="kv"><span>户位</span><b>' + d.rm + '</b></div>' +
     '<div class="kv"><span>场地位置</span><b>' + posTxt + '（南起第 ' + (bi+1) + ' 排）</b></div>' +
     '<div class="kv"><span>实际楼层</span><b>' + d.fr + ' 层</b></div>' +
-    '<div class="kv"><span>名义楼层</span><b>' + d.fn + ' 层</b></div>' +
+    '<div class="kv"><span>名义楼层</span><b>' + d.fn + ' 层（门牌用此层）</b></div>' +
     '<div class="kv"><span>建筑面积</span><b>' + fmt2(d.a) + ' m²</b></div>' +
     '<div class="kv"><span>楼层单价差</span><b style="color:' +
       (d.d == null ? '#8b96a6' : (d.d >= 0 ? '#e0473c' : '#3fb6d8')) + '">' + fmtD(d.d) + '</b></div>' +
