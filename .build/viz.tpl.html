@@ -32,7 +32,7 @@
     font-variant-numeric:tabular-nums;line-height:1.2}
   #head .kpi span{display:block;font-size:10.5px;color:var(--dim);white-space:nowrap}
 
-  #ctl{top:178px;left:16px;width:264px;max-height:calc(100vh - 206px);overflow-y:auto}
+  #ctl{top:222px;left:16px;width:264px;max-height:calc(100vh - 250px);overflow-y:auto}
   #ctl::-webkit-scrollbar{width:6px}
   #ctl::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
   .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px}
@@ -227,6 +227,7 @@
     <div class="kpi"><b id="kpiCnt">–</b><span>可售套数</span></div>
     <div class="kpi"><b id="kpiArea">–</b><span>总建面 m²</span></div>
   </div>
+  <button class="galbtn" id="galOpen">📷 查看 Blender 效果图与日照动画</button>
 </div>
 
 <div class="panel" id="ctl">
@@ -260,6 +261,7 @@
   <label class="chk"><input type="checkbox" id="cLabel" checked> 楼栋 / 单元标签</label>
   <label class="chk"><input type="checkbox" id="cFloor" checked> 楼层刻度</label>
   <label class="chk"><input type="checkbox" id="cGhost" checked> 非住宅基座（1层，无定价）</label>
+  <label class="chk"><input type="checkbox" id="cArch" checked> 圆角檐口 / Y形建筑构架</label>
   <label class="chk"><input type="checkbox" id="cSunRay" checked> 冬至日照方向示意</label>
   <div class="sub" style="margin:2px 0 0 22px">☀ 正南 · 高度角≈35°（上海冬至正午）</div>
 
@@ -275,7 +277,6 @@
     拖拽旋转 · 滚轮缩放 · 右键平移 · 单击选中房源<br>
     <kbd>W</kbd> 加入/移出意向 &nbsp; <kbd>C</kbd> 对比 &nbsp; <kbd>G</kbd> 效果图 &nbsp; <kbd>Esc</kbd> 取消
   </div>
-  <button class="galbtn" id="galOpen">📷 Blender 效果图与日照动画</button>
 </div>
 
 <div class="panel" id="info">
@@ -312,7 +313,7 @@
     <h2>Blender 离线渲染 · 效果图与日照动画</h2>
     <p class="lead">
       Cycles + Metal GPU 渲染，几何由本页同一份数据程序化生成，尺度为真实米制
-      （层高 3.0 m、进深 11 m、檐高 28.2 m），约 2000 个物体。
+      （层高 3.0 m、进深 11 m、檐高 28.2 m），2902 个物体、29 种材质。
       主光源按上海冬至真实太阳位置设置（NOAA 算法，正午高度角 35.33°），
       所以阴影方向与长度都是算出来的。楼间距由日照数据反推：11幢→8幢 42 m、8幢→5幢 30 m。
     </p>
@@ -496,12 +497,60 @@ function makeLabel(text, o){
   return sp;
 }
 
+/* ---- 建筑表现构架：把 Blender 视觉语言同步到实时 Three.js 主场景 ---- */
+function roundedRectShape(w, d, r){
+  const s = new THREE.Shape(), x = -w/2, z = -d/2;
+  r = Math.min(r, w/2, d/2);
+  s.moveTo(x+r, z);
+  s.lineTo(x+w-r, z); s.quadraticCurveTo(x+w, z, x+w, z+r);
+  s.lineTo(x+w, z+d-r); s.quadraticCurveTo(x+w, z+d, x+w-r, z+d);
+  s.lineTo(x+r, z+d); s.quadraticCurveTo(x, z+d, x, z+d-r);
+  s.lineTo(x, z+r); s.quadraticCurveTo(x, z, x+r, z);
+  return s;
+}
+function roundedSlabGeo(w, d, h, r){
+  const geo = new THREE.ExtrudeGeometry(roundedRectShape(w,d,r), {
+    depth:h, bevelEnabled:true, bevelSegments:3, bevelSize:.045,
+    bevelThickness:.035, curveSegments:5
+  });
+  // Shape 的 y 映射为场地 Z，Extrude 的 z 映射为竖向 Y
+  geo.rotateX(-Math.PI/2);
+  return geo;
+}
+function flaredPierGeo(h, slim, flare, depth){
+  const s = new THREE.Shape(), n = 9, left = [], right = [];
+  for(let i=0;i<n;i++){
+    const t=i/(n-1), q0=Math.abs(t-.5)*2, q=q0*q0*(3-2*q0);
+    const w=slim+(flare-slim)*q;
+    left.push([-w, t*h]); right.push([w, t*h]);
+  }
+  s.moveTo(left[0][0],left[0][1]);
+  left.slice(1).forEach(p=>s.lineTo(p[0],p[1]));
+  right.slice().reverse().forEach(p=>s.lineTo(p[0],p[1]));
+  s.closePath();
+  const geo=new THREE.ExtrudeGeometry(s,{depth:depth,bevelEnabled:true,
+    bevelSegments:2,bevelSize:.025,bevelThickness:.02,curveSegments:4});
+  return geo;
+}
+const archMat = new THREE.MeshStandardMaterial({
+  color:'#d3bfa5', roughness:.48, metalness:.08
+});
+const archEdgeMat = new THREE.MeshStandardMaterial({
+  color:'#efe4d2', roughness:.38, metalness:.12
+});
+const archGlassMat = new THREE.MeshStandardMaterial({
+  color:'#4f5a63', roughness:.12, metalness:.38,
+  transparent:true, opacity:.72
+});
+const lawnMat = new THREE.MeshStandardMaterial({color:'#3f6f50',roughness:.92});
+
 /* ---- 建楼：东西向排房号，南北向排楼栋 ---- */
 const unitGeo = new THREE.BoxGeometry(UW, UH, UD);
 const edgeGeo = new THREE.EdgesGeometry(unitGeo);
 const meshes = [];
-const labelGroup = new THREE.Group(), floorGroup = new THREE.Group(), podGroup = new THREE.Group();
-scene.add(labelGroup, floorGroup, podGroup);
+const labelGroup = new THREE.Group(), floorGroup = new THREE.Group(),
+      podGroup = new THREE.Group(), archGroup = new THREE.Group();
+scene.add(labelGroup, floorGroup, podGroup, archGroup);
 
 const widths = ROWS.map(function(B){
   const nU = new Set(B.cols.map(function(c){ return c.u; })).size;
@@ -528,6 +577,55 @@ ROWS.forEach(function(B, bi){
     lx += UW + GX;
     prevU = c.u;
   });
+
+  /* 实时建筑构架：数据盒仍负责着色与交互，暖色构架作为外骨骼叠加。
+     这样既保留一房一价表达，又让首屏直接呈现宣传图的建筑语言。 */
+  const ag = new THREE.Group();
+  ag.name = B.name + '_建筑构架';
+  B.archGroup = ag;
+  archGroup.add(ag);
+
+  const maxF = Math.max.apply(null, B.floorList);
+  const slabGeo = roundedSlabGeo(B.width+.65, UD+1.05, .18, .34);
+  for(let f=1; f<=maxF; f++){
+    const top=(f-1)*(UH+GY)+UH;
+    const slab=new THREE.Mesh(slabGeo,archEdgeMat);
+    slab.position.set(0,top-.11,B.z+.20);
+    slab.castShadow=slab.receiveShadow=true;
+    ag.add(slab);
+  }
+
+  const boundaries=[B.cols[0].x-UW/2];
+  for(let i=1;i<B.cols.length;i++){
+    boundaries.push(((B.cols[i-1].x+UW/2)+(B.cols[i].x-UW/2))/2);
+  }
+  boundaries.push(B.cols[B.cols.length-1].x+UW/2);
+  const pierInner=flaredPierGeo(UH-.14,.055,.22,.30);
+  const pierEdge=flaredPierGeo(UH-.14,.075,.28,.34);
+  for(let f=1;f<=maxF;f++){
+    boundaries.forEach(function(x,i){
+      const pm=new THREE.Mesh((i===0||i===boundaries.length-1)?pierEdge:pierInner,archEdgeMat);
+      pm.position.set(x,(f-1)*(UH+GY)+.07,B.z+UD/2+.28);
+      pm.castShadow=true;
+      ag.add(pm);
+    });
+  }
+
+  // 最低住宅层为2层时，把原来的实心基座前方覆成通透玻璃架空层
+  const minF0=Math.min.apply(null,B.floorList);
+  if(minF0>1){
+    const h=(minF0-1)*(UH+GY)-GY;
+    const glass=new THREE.Mesh(new THREE.BoxGeometry(B.width-.9,h-.25,.07),archGlassMat);
+    glass.position.set(0,h/2,B.z+UD/2+.31);
+    ag.add(glass);
+  }
+  // 每栋南侧一块深绿前庭和中轴步道，打破原先只有灰色网格地面的体量模型感
+  const lawn=new THREE.Mesh(new THREE.BoxGeometry(B.width+5,.08,7),lawnMat);
+  lawn.position.set(0,.025,B.z+UD/2+4.45);
+  lawn.receiveShadow=true; ag.add(lawn);
+  const path=new THREE.Mesh(new THREE.BoxGeometry(2.2,.10,7.1),archMat);
+  path.position.set(0,.075,B.z+UD/2+4.45);
+  path.receiveShadow=true; ag.add(path);
 
   const yTop = (Math.max.apply(null, B.floorList) - 1) * (UH+GY) + UH;
   const minF = Math.min.apply(null, B.floorList);
@@ -1316,6 +1414,7 @@ function syncChks(){
     const on = !hiddenB.has(B.name);
     B.group.children.forEach(function(o){ if(!o.userData.d) o.visible = on; });
     if(B.plate) B.plate.visible = on;
+    if(B.archGroup) B.archGroup.visible = on;
   });
 }
 chkWrap.onchange = function(e){
@@ -1326,12 +1425,14 @@ chkWrap.onchange = function(e){
 document.getElementById('cLabel').onchange = function(){ labelGroup.visible = this.checked; };
 document.getElementById('cFloor').onchange = function(){ floorGroup.visible = this.checked; };
 document.getElementById('cGhost').onchange = function(){ podGroup.visible = this.checked; };
+document.getElementById('cArch').onchange = function(){ archGroup.visible = this.checked; };
 document.getElementById('cSunRay').onchange = function(){ sunViz.visible = this.checked; };
 
 /* ---- 视角：包围盒只取楼栋本体 ---- */
 const bbox = new THREE.Box3();
 ROWS.forEach(function(B){ bbox.expandByObject(B.group); });
 podGroup.children.forEach(function(p){ if(p.isMesh) bbox.expandByObject(p); });
+bbox.expandByObject(archGroup);
 // 指北针也纳入取景，否则会被裁在画面外
 bbox.expandByPoint(compass.position.clone().add(new THREE.Vector3(5, 0, 5)));
 bbox.expandByPoint(compass.position.clone().add(new THREE.Vector3(-5, 0, -5)));
