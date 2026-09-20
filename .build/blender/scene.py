@@ -50,6 +50,15 @@ def ramp_hex(stops, t):
     return '#%02x%02x%02x' % tuple(int(a[k] + (b[k] - a[k]) * f) for k in range(3))
 
 
+def rnd(key, salt=0):
+    """FNV-1a 哈希得到的确定性伪随机数 ∈ [0,1)。
+    逐户差异必须可复现（同一户每次渲染长得一样），所以不能用 random。"""
+    h = 2166136261
+    for ch in f'{key}#{salt}':
+        h = ((h ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+    return (h % 100000) / 100000.0
+
+
 # ---------------- 网格工具 ----------------
 def clear_scene():
     global _BLOB
@@ -222,6 +231,20 @@ def palette():
     p['邻楼'] = make_mat('邻楼', hex_rgba('#b8a894'), rough=0.60)
     p['邻楼2'] = make_mat('邻楼2', hex_rgba('#9a9384'), rough=0.62)
     p['邻窗'] = make_mat('邻窗', hex_rgba('#1b2f40'), rough=0.10, metal=0.3)
+
+    # --- 逐户差异用的窗面材质 ---
+    # 真实住宅楼不存在两扇一样的窗：有的拉着窗帘、有的能看进室内、有的只反天空。
+    # 这是让渲染"不像模型"的最大杠杆，比贴图分辨率重要得多。
+    p['窗帘白'] = make_mat('窗帘白', hex_rgba('#d9d2c4'), rough=0.72)
+    p['窗帘暖'] = make_mat('窗帘暖', hex_rgba('#c7b295'), rough=0.74)
+    p['窗帘灰'] = make_mat('窗帘灰', hex_rgba('#9aa0a4'), rough=0.70)
+    p['室内暗'] = make_mat('室内暗', hex_rgba('#151a20'), rough=0.85)
+    p['室内暖'] = make_mat('室内暖', hex_rgba('#2a2420'), rough=0.8,
+                          emit=hex_rgba('#ffc98a'), emit_str=0.25)
+    p['玻璃亮'] = make_mat('玻璃亮', hex_rgba('#173448'), rough=0.020, metal=0.30, coat=0.6)
+    p['玻璃哑'] = make_mat('玻璃哑', hex_rgba('#0b2233'), rough=0.075, metal=0.18, coat=0.4)
+    p['空调'] = make_mat('空调外机', hex_rgba('#c9c6bd'), rough=0.55, metal=0.25)
+    p['阳台地'] = make_mat('阳台地面', hex_rgba('#a89882'), rough=0.62, bump=(30, 0.10))
     return p
 
 
@@ -345,6 +368,19 @@ def build(mode='arch', metric='price', balconies=True, context=True):
 
         add_box(f'{name}_女儿墙', b['x0'] - 0.12, b['x1'] + 0.12,
                 b['y0'] - 0.12, b['y1'] + 0.12, roof, roof + GEO['parapet'], P['女儿墙'], col)
+
+        # 竖向壁柱：在单元分界处通高，打断过长的水平立面，也是住宅立面的常见手法
+        seen_u = []
+        for ck in cols:
+            if ck[0] not in seen_u:
+                seen_u.append(ck[0])
+        n_per_u = max(1, len(cols) // max(1, len(seen_u)))
+        for k in range(len(seen_u) + 1):
+            px = b['x0'] + k * n_per_u * UNIT_W
+            px = min(max(px, b['x0']), b['x1'])
+            add_box(f'{name}_壁柱_{k}', px - 0.36, px + 0.36,
+                    b['y0'] - 0.55, b['y0'] + 0.1, 0, roof + GEO['parapet'],
+                    P['外墙深'], col)
         add_box(f'{name}_屋面', b['x0'], b['x1'], b['y0'], b['y1'],
                 roof - 0.05, roof + 0.06, P['屋面'], col)
         # 屋顶机房与电梯井（仅视觉，未计入 solar.py 的遮挡模型）
@@ -360,40 +396,79 @@ def build(mode='arch', metric='price', balconies=True, context=True):
                 u = by_key.get((name, ck[0], ck[1], f))
                 if not u or u['p'] is None:
                     continue
+                key = f"{u['b']}|{u['u']}|{u['rm']}|{u['fr']}"
                 zb = (f - 1) * FLOOR_H
                 x0, x1 = cx0 + 0.70, cx0 + UNIT_W - 0.70
                 z0, z1 = zb + 0.90, zb + 2.60
                 y = b['y0'] - 0.10
 
+                # 室内凹深：玻璃后面塞一个暗盒，窗才不像贴在墙上的贴纸
+                r_in = rnd(key, 3)
+                inner = P['室内暖'] if r_in > 0.88 else P['室内暗']
+                add_box(f'{name}_室内_{ci}_{f}', x0, x1, b['y0'] + 0.02, b['y0'] + 1.5,
+                        z0, z1, inner, col)
                 add_box(f'{name}_洞_{ci}_{f}', x0 - 0.14, x1 + 0.14, y, b['y0'],
                         z0 - 0.14, z1 + 0.14, P['窗框'], col)
+
+                # 逐户窗面：约 40% 拉窗帘、12% 敞开露室内、其余反射玻璃
+                r = rnd(key, 0)
+                if mode == 'data':
+                    pm = unit_mat(u)
+                elif r < 0.22:
+                    pm = P['窗帘白']
+                elif r < 0.34:
+                    pm = P['窗帘暖']
+                elif r < 0.42:
+                    pm = P['窗帘灰']
+                elif r < 0.54:
+                    pm = P['玻璃哑']
+                elif r < 0.66:
+                    pm = P['玻璃亮']
+                else:
+                    pm = P['玻璃']
                 pane = add_quad(f'{name}_窗_{ci}_{f}',
                                 [(x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1)],
-                                unit_mat(u), col)
-                pane['unit'] = f"{u['b']}|{u['u']}|{u['rm']}|{u['fr']}"
+                                pm, col)
+                pane['unit'] = key
                 pane['price'] = u['p']
                 pane['sun'] = u['s']
-                add_box(f'{name}_框_{ci}_{f}', (x0 + x1) / 2 - 0.05, (x0 + x1) / 2 + 0.05,
-                        y - 0.05, b['y0'], z0, z1, P['窗框'], col)
+
+                # 窗棂网格：两道竖框 + 一道横向中横档，替代原来的单根中缝
+                for t in (1 / 3, 2 / 3):
+                    mx2 = x0 + (x1 - x0) * t
+                    add_box(f'{name}_竖棂_{ci}_{f}_{t:.2f}', mx2 - 0.045, mx2 + 0.045,
+                            y - 0.05, b['y0'], z0, z1, P['窗框'], col)
+                zt = z0 + (z1 - z0) * 0.62
+                add_box(f'{name}_横档_{ci}_{f}', x0, x1, y - 0.05, b['y0'],
+                        zt - 0.045, zt + 0.045, P['窗框'], col)
 
                 if balconies:
-                    # 阳台：挑板 + 玻璃栏板 + 金属扶手。
-                    # 这是让体量从"写字楼白盒子"变成住宅的关键——改的是轮廓，不是贴图。
+                    # 阳台：挑板 + 玻璃栏板 + 金属扶手 + 侧向隔板。
+                    # 改的是轮廓，这是让体量从"写字楼白盒子"变成住宅的关键。
                     bx0, bx1 = cx0 + 0.35, cx0 + UNIT_W - 0.35
                     by = b['y0'] - 1.55
                     add_box(f'{name}_阳台板_{ci}_{f}', bx0, bx1, by, b['y0'],
-                            zb + 0.02, zb + 0.20, P['线条'], col)
+                            zb + 0.02, zb + 0.18, P['线条'], col)
+                    add_box(f'{name}_阳台地_{ci}_{f}', bx0 + 0.04, bx1 - 0.04,
+                            by + 0.04, b['y0'], zb + 0.18, zb + 0.21, P['阳台地'], col)
                     add_quad(f'{name}_栏板_{ci}_{f}',
-                             [(bx0, by, zb + 0.20), (bx1, by, zb + 0.20),
+                             [(bx0, by, zb + 0.21), (bx1, by, zb + 0.21),
                               (bx1, by, zb + 1.28), (bx0, by, zb + 1.28)],
                              P['栏板'], col)
                     add_box(f'{name}_扶手_{ci}_{f}', bx0, bx1, by - 0.05, by + 0.05,
                             zb + 1.28, zb + 1.36, P['金属'], col)
-                    for sx in (bx0, bx1):          # 侧向隔板
+                    for sx in (bx0, bx1):
                         add_quad(f'{name}_侧板_{ci}_{f}_{sx:.1f}',
-                                 [(sx, by, zb + 0.20), (sx, b['y0'], zb + 0.20),
+                                 [(sx, by, zb + 0.21), (sx, b['y0'], zb + 0.21),
                                   (sx, b['y0'], zb + 1.28), (sx, by, zb + 1.28)],
                                  P['栏板'], col)
+                    # 空调外机：国内住宅立面最典型的"生活痕迹"，位置左右随户而异
+                    if rnd(key, 1) > 0.22:
+                        side = rnd(key, 2) > 0.5
+                        ax = (bx0 + 0.28) if side else (bx1 - 0.98)
+                        add_box(f'{name}_空调_{ci}_{f}', ax, ax + 0.70,
+                                by + 0.10, by + 0.42, zb + 0.24, zb + 0.78,
+                                P['空调'], col)
 
         for ci in range(len(cols)):
             cx0 = b['x0'] + ci * UNIT_W

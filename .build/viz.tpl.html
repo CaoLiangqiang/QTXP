@@ -96,6 +96,36 @@
   kbd{padding:1px 5px;border:1px solid var(--line);border-radius:4px;
     background:rgba(255,255,255,.08);font:inherit;font-size:11px;color:var(--txt)}
 
+  /* ---------- 效果图画廊 ---------- */
+  .galbtn{display:block;width:100%;margin-top:10px;padding:9px;cursor:pointer;
+    font:700 12.5px/1.2 inherit;border-radius:9px;transition:.16s;
+    background:rgba(63,182,216,.14);border:1px solid rgba(63,182,216,.45);color:var(--teal)}
+  .galbtn:hover{background:rgba(63,182,216,.26)}
+  #gal{position:fixed;inset:0;z-index:40;display:none;
+    background:rgba(6,9,13,.93);backdrop-filter:blur(8px);overflow-y:auto}
+  #gal.show{display:block}
+  #gal .wrap{max-width:1180px;margin:0 auto;padding:26px 24px 44px}
+  #gal h2{margin:0 0 4px;font-size:19px}
+  #gal .lead{margin:0 0 18px;font-size:12px;color:var(--dim);line-height:1.7}
+  #gal .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(316px,1fr))}
+  #gal figure{margin:0;background:rgba(255,255,255,.04);border:1px solid var(--line);
+    border-radius:12px;overflow:hidden;cursor:zoom-in}
+  #gal figure.vid{cursor:default}
+  #gal img,#gal video{display:block;width:100%;background:#0b0e13}
+  #gal figcaption{padding:9px 12px;font-size:12px}
+  #gal figcaption b{display:block;font-weight:700}
+  #gal figcaption span{color:var(--dim);font-size:11px}
+  #gal .miss{padding:26px 12px;text-align:center;font-size:11.5px;color:var(--red);
+    line-height:1.7}
+  #galClose{position:fixed;top:18px;right:22px;z-index:42;padding:7px 13px;cursor:pointer;
+    font:700 12px/1.2 inherit;color:var(--txt);background:rgba(255,255,255,.1);
+    border:1px solid var(--line);border-radius:8px}
+  #galClose:hover{background:rgba(255,255,255,.2)}
+  #lightbox{position:fixed;inset:0;z-index:44;display:none;cursor:zoom-out;
+    background:rgba(3,5,8,.97);align-items:center;justify-content:center;padding:24px}
+  #lightbox.show{display:flex}
+  #lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
+
   #tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;
     background:rgba(8,11,15,.95);border:1px solid var(--line);border-radius:9px;
     padding:8px 11px;font-size:12px;white-space:nowrap;z-index:9;
@@ -243,8 +273,9 @@
   </div>
   <div class="sub" style="border-top:1px solid var(--line);padding-top:10px">
     拖拽旋转 · 滚轮缩放 · 右键平移 · 单击选中房源<br>
-    <kbd>W</kbd> 加入/移出意向 &nbsp; <kbd>C</kbd> 对比 &nbsp; <kbd>Esc</kbd> 取消
+    <kbd>W</kbd> 加入/移出意向 &nbsp; <kbd>C</kbd> 对比 &nbsp; <kbd>G</kbd> 效果图 &nbsp; <kbd>Esc</kbd> 取消
   </div>
+  <button class="galbtn" id="galOpen">📷 Blender 效果图与日照动画</button>
 </div>
 
 <div class="panel" id="info">
@@ -274,6 +305,21 @@
   </div>
   <div class="cmpBody"><table id="cmpTable"></table></div>
 </div>
+
+<div id="gal">
+  <button id="galClose">关闭 ✕</button>
+  <div class="wrap">
+    <h2>Blender 离线渲染 · 效果图与日照动画</h2>
+    <p class="lead">
+      Cycles + Metal GPU 渲染，几何由本页同一份数据程序化生成，尺度为真实米制
+      （层高 3.0 m、进深 11 m、檐高 28.2 m），约 2000 个物体。
+      主光源按上海冬至真实太阳位置设置（NOAA 算法，正午高度角 35.33°），
+      所以阴影方向与长度都是算出来的。楼间距由日照数据反推：11幢→8幢 42 m、8幢→5幢 30 m。
+    </p>
+    <div class="grid" id="galGrid"></div>
+  </div>
+</div>
+<div id="lightbox"><img alt=""></div>
 
 <div id="tip"></div>
 
@@ -680,8 +726,18 @@ renderer.domElement.addEventListener('pointerup', function(){
 });
 addEventListener('keydown', function(e){
   if(e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
-  if(e.key === 'Escape'){ if(cmpOpen) setCmp(false); else select(null); return; }
+  const lb = document.getElementById('lightbox');
+  const gal = document.getElementById('gal');
+  if(e.key === 'Escape'){
+    // 关闭顺序由内到外：灯箱 → 画廊 → 对比抽屉 → 取消选中
+    if(lb.classList.contains('show')){ lb.classList.remove('show'); return; }
+    if(gal.classList.contains('show')){ setGal(false); return; }
+    if(cmpOpen) setCmp(false); else select(null);
+    return;
+  }
+  if(gal.classList.contains('show')) return;      // 画廊打开时不响应场景快捷键
   const k = e.key.toLowerCase();
+  if(k === 'g'){ setGal(true); return; }
   if(k === 'w' && selected){ wishToggle(selected.userData.d); return; }
   if(k === 'c'){ setCmp(!cmpOpen); }
 });
@@ -1346,6 +1402,62 @@ controls.target.set(center.x, eye, 0);
 document.getElementById('kpiAvg').textContent = fmtI(SUM_MONEY*10000/SUM_AREA);
 document.getElementById('kpiCnt').textContent = valid.length;
 document.getElementById('kpiArea').textContent = fmtI(SUM_AREA);
+
+/* ================= Blender 效果图画廊 ================= */
+const GAL = [
+  {f:'renders/10_黄昏鸟瞰.jpg', t:'黄昏鸟瞰', d:'冬至 14:45 · 高度角 21.4° · 西南向侧逆光'},
+  {f:'renders/11_近景人视.jpg', t:'近景人视', d:'1.9 m 真人视高 · 28 mm · f/6 景深 · 看阳台细节'},
+  {f:'renders/12_楼间对望.jpg', t:'楼间对望', d:'站在 8幢 与 5幢 之间 · 正午阴影切在 5幢 立面上'},
+  {f:'renders/01_东南鸟瞰.jpg', t:'东南鸟瞰', d:'冬至正午'},
+  {f:'renders/02_正午长影.jpg', t:'低角度长影', d:'9:15 · 长影投向西北'},
+  {f:'renders/03_俯视总平.jpg', t:'俯视总平', d:'南北三排关系与地面阴影'},
+  {f:'renders/04_单价着色.jpg', t:'单价着色', d:'窗面按单价着色，与本页同一色阶'},
+  {f:'renders/05_日照着色.jpg', t:'日照着色', d:'沿用宣传图的日照图例配色'},
+  {f:'renders/冬至日照动画.mp4', t:'冬至日照动画', d:'9–15 时 · 73 帧 · 5 分钟步长', v:true},
+  {f:'renders/环绕.mp4', t:'环绕', d:'绕场地一圈 · 72 帧', v:true}
+];
+let galBuilt = false;
+
+function buildGal(){
+  if(galBuilt) return;
+  galBuilt = true;
+  const g = document.getElementById('galGrid');
+  g.innerHTML = GAL.map(function(it){
+    const media = it.v
+      ? '<video src="' + it.f + '" controls loop muted playsinline preload="metadata"></video>'
+      : '<img src="' + it.f + '" alt="' + it.t + '" loading="lazy">';
+    return '<figure' + (it.v ? ' class="vid"' : '') + ' data-src="' + (it.v ? '' : it.f) + '">' +
+      media + '<figcaption><b>' + it.t + '</b><span>' + it.d + '</span></figcaption></figure>';
+  }).join('');
+  // 渲染成品是独立文件而非内联，HTML 被单独挪走时会 404 —— 明确提示而不是留一片空白
+  g.querySelectorAll('img,video').forEach(function(el){
+    el.addEventListener('error', function(){
+      const fig = el.closest('figure');
+      const src = el.getAttribute('src') || '';
+      el.remove();
+      const p = document.createElement('div');
+      p.className = 'miss';
+      p.innerHTML = '未找到 <b>' + src + '</b><br>' +
+        '渲染成品是独立文件，需要 <b>renders/</b> 目录与本 HTML 位于同一层目录。';
+      fig.insertBefore(p, fig.firstChild);
+    });
+  });
+  g.onclick = function(e){
+    const fig = e.target.closest('figure[data-src]');
+    if(!fig || !fig.dataset.src) return;
+    const lb = document.getElementById('lightbox');
+    lb.querySelector('img').src = fig.dataset.src;
+    lb.classList.add('show');
+  };
+}
+function setGal(v){
+  if(v) buildGal();
+  document.getElementById('gal').classList.toggle('show', !!v);
+  if(!v) document.getElementById('lightbox').classList.remove('show');
+}
+document.getElementById('galOpen').onclick = function(){ setGal(true); };
+document.getElementById('galClose').onclick = function(){ setGal(false); };
+document.getElementById('lightbox').onclick = function(){ this.classList.remove('show'); };
 
 refreshWish();
 
