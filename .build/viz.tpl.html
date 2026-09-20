@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>前滩尚品 · 一房一价 &amp; 日照 3D 可视化</title>
+<style>
+  :root{
+    --bg:#0b0e13; --panel:rgba(18,23,31,.88); --line:rgba(255,255,255,.1);
+    --txt:#e8ecf2; --dim:#8b96a6; --accent:#f5a623; --teal:#3fb6d8; --red:#e0473c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
+    font:14px/1.5 "PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #app{position:fixed;inset:0;
+    background:radial-gradient(125% 95% at 50% 6%, #1e2c3b 0%, #141a23 46%, #0b0e13 100%)}
+  canvas{display:block}
+
+  .panel{position:absolute;background:var(--panel);backdrop-filter:blur(16px);
+    border:1px solid var(--line);border-radius:14px;padding:14px 16px;
+    box-shadow:0 14px 44px rgba(0,0,0,.5)}
+  .panel h2{margin:0 0 2px;font-size:17px;font-weight:700;letter-spacing:.3px}
+  .panel h3{margin:0 0 8px;font-size:11px;font-weight:700;color:var(--dim);
+    letter-spacing:1.4px}
+  .sub{font-size:11.5px;color:var(--dim);line-height:1.65}
+
+  #head{top:16px;left:16px;width:334px}
+  #head .bar{display:flex;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+  #head .kpi{flex:1;min-width:0}
+  #head .kpi b{display:block;font-size:17px;font-weight:700;color:var(--accent);
+    font-variant-numeric:tabular-nums;line-height:1.2}
+  #head .kpi span{display:block;font-size:10.5px;color:var(--dim);white-space:nowrap}
+
+  #ctl{top:178px;left:16px;width:264px;max-height:calc(100vh - 206px);overflow-y:auto}
+  #ctl::-webkit-scrollbar{width:6px}
+  #ctl::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px}
+  .seg button{padding:7px 4px;font:600 12px/1.2 inherit;color:var(--dim);cursor:pointer;
+    background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:8px;
+    transition:.16s}
+  .seg button:hover{color:var(--txt);background:rgba(255,255,255,.1)}
+  .seg button.on{color:#0e1116;background:var(--accent);border-color:var(--accent)}
+  .seg button.wide{grid-column:1/-1}
+
+  #legend{margin-bottom:14px}
+  #ramp{height:11px;border-radius:6px;margin:6px 0 4px}
+  #rampTicks{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);
+    font-variant-numeric:tabular-nums}
+  #swatches{display:flex;flex-wrap:wrap;gap:4px}
+  #swatches i{display:flex;align-items:center;gap:4px;font-size:10.5px;font-style:normal;
+    color:var(--dim)}
+  #swatches i s{width:11px;height:11px;border-radius:3px;text-decoration:none}
+
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;
+    font-size:12px}
+  .row label{color:var(--dim)}
+  .row output{font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent)}
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;
+    background:rgba(255,255,255,.18);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
+    border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0e1116}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);
+    cursor:pointer;padding:3px 0}
+  .chk input{accent-color:var(--accent);cursor:pointer}
+  hr{border:0;border-top:1px solid var(--line);margin:13px 0}
+
+  #info{top:16px;right:16px;width:292px;max-height:calc(100vh - 32px);overflow-y:auto}
+  #info::-webkit-scrollbar{width:6px}
+  #info::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+  #info .tag{display:inline-block;padding:2px 8px;border-radius:5px;font-size:11px;
+    font-weight:700;background:rgba(245,166,35,.16);color:var(--accent);margin-bottom:8px}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;
+    border-bottom:1px dashed rgba(255,255,255,.07);font-size:12.5px}
+  .kv:last-child{border:0}
+  .kv span{color:var(--dim)}
+  .kv b{font-variant-numeric:tabular-nums;font-weight:700}
+  .big{font-size:23px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;
+    line-height:1.1;margin:2px 0 1px}
+  .sunpill{display:inline-block;padding:3px 10px;border-radius:11px;font-size:11.5px;
+    font-weight:700;color:#fff}
+  #chart{width:100%;height:112px;display:block;margin-top:6px}
+  .colbars{margin-top:4px}
+  .colbar{display:flex;align-items:center;gap:6px;margin:4px 0;font-size:11px}
+  .colbar em{width:56px;color:var(--dim);font-style:normal;flex:none}
+  .colbar u{flex:1;height:9px;background:rgba(255,255,255,.07);border-radius:5px;
+    text-decoration:none;overflow:hidden}
+  .colbar u i{display:block;height:100%;border-radius:5px}
+  .colbar b{width:52px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+  .flagbtn{display:block;width:100%;text-align:left;margin:4px 0;padding:6px 9px;
+    font:500 11.5px/1.45 inherit;color:var(--dim);cursor:pointer;
+    background:rgba(224,71,60,.09);border:1px solid rgba(224,71,60,.3);border-radius:7px}
+  .flagbtn:hover{color:var(--txt);background:rgba(224,71,60,.2)}
+  .flagbtn b{color:var(--red)}
+
+  kbd{padding:1px 5px;border:1px solid var(--line);border-radius:4px;
+    background:rgba(255,255,255,.08);font:inherit;font-size:11px;color:var(--txt)}
+
+  #tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;
+    background:rgba(8,11,15,.95);border:1px solid var(--line);border-radius:9px;
+    padding:8px 11px;font-size:12px;white-space:nowrap;z-index:9;
+    box-shadow:0 8px 24px rgba(0,0,0,.55)}
+  #tip .t{font-weight:700;margin-bottom:3px}
+  #tip .p{color:var(--accent);font-variant-numeric:tabular-nums;font-weight:700}
+  #tip .s{color:var(--dim);font-size:11px}
+
+  /* ---------- 购房意向 ---------- */
+  .wishbtn{display:block;width:100%;margin:10px 0 2px;padding:9px;cursor:pointer;
+    font:700 12.5px/1.2 inherit;border-radius:9px;transition:.16s;
+    background:rgba(245,166,35,.14);border:1px solid rgba(245,166,35,.45);color:var(--accent)}
+  .wishbtn:hover{background:rgba(245,166,35,.26)}
+  .wishbtn.on{background:rgba(224,71,60,.14);border-color:rgba(224,71,60,.45);color:#f08a80}
+  .rankctl{display:flex;gap:6px;margin:6px 0 2px}
+  .rankctl button{flex:1;padding:5px;cursor:pointer;font:600 11.5px/1.2 inherit;
+    color:var(--dim);background:rgba(255,255,255,.05);
+    border:1px solid var(--line);border-radius:7px}
+  .rankctl button:hover{color:var(--txt);background:rgba(255,255,255,.1)}
+
+  #wish{bottom:16px;left:50%;transform:translateX(-50%);
+    max-width:min(900px,calc(100vw - 660px));display:flex;align-items:center;gap:9px;
+    padding:9px 12px}
+  #wishChips{display:flex;gap:6px;overflow-x:auto;flex:1;min-width:0;padding-bottom:2px}
+  #wishChips::-webkit-scrollbar{height:5px}
+  #wishChips::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+  .chip{display:flex;align-items:center;gap:6px;flex:none;padding:4px 8px 4px 4px;
+    border-radius:20px;background:rgba(255,255,255,.06);border:1px solid var(--line);
+    font-size:11.5px;cursor:pointer;white-space:nowrap;transition:.16s}
+  .chip:hover{background:rgba(255,255,255,.13)}
+  .chip i{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;
+    font:800 11px/1 inherit;color:#111;font-style:normal;flex:none}
+  .chip em{font-style:normal;color:var(--dim);padding:0 1px}
+  .chip em:hover{color:var(--red)}
+  #wish .act{display:flex;gap:6px;flex:none}
+  #wish .act button{padding:6px 10px;cursor:pointer;font:600 11.5px/1.2 inherit;
+    color:var(--dim);background:rgba(255,255,255,.05);border:1px solid var(--line);
+    border-radius:8px;transition:.16s}
+  #wish .act button:hover{color:var(--txt);background:rgba(255,255,255,.12)}
+  #wish .act button.on{color:#0e1116;background:var(--accent);border-color:var(--accent)}
+  #wish .hint{font-size:11.5px;color:var(--dim);white-space:nowrap}
+
+  #cmp{position:absolute;left:50%;transform:translateX(-50%);bottom:74px;
+    width:min(980px,calc(100vw - 660px));max-height:62vh;display:none;
+    background:var(--panel);backdrop-filter:blur(16px);border:1px solid var(--line);
+    border-radius:14px;box-shadow:0 18px 54px rgba(0,0,0,.6);overflow:hidden;z-index:8}
+  #cmp.show{display:flex;flex-direction:column}
+  .cmpHead{display:flex;align-items:center;gap:10px;padding:11px 14px;
+    border-bottom:1px solid var(--line)}
+  .cmpHead b{font-size:13.5px}
+  .cmpHead .meta{font-size:11.5px;color:var(--dim);flex:1}
+  .cmpHead button{padding:5px 10px;cursor:pointer;font:600 11.5px/1.2 inherit;
+    color:var(--dim);background:rgba(255,255,255,.05);border:1px solid var(--line);
+    border-radius:7px}
+  .cmpHead button:hover{color:var(--txt);background:rgba(255,255,255,.12)}
+  .cmpBody{overflow:auto;padding:4px 0}
+  #cmpTable{border-collapse:collapse;font-size:12px;width:100%}
+  #cmpTable th,#cmpTable td{padding:6px 10px;text-align:right;white-space:nowrap;
+    border-bottom:1px solid rgba(255,255,255,.06);font-variant-numeric:tabular-nums}
+  #cmpTable th.k{text-align:left;color:var(--dim);font-weight:600;position:sticky;left:0;
+    background:#141a22;z-index:1;min-width:104px}
+  #cmpTable thead th{color:var(--txt);font-weight:700;cursor:pointer}
+  #cmpTable thead th:hover{color:var(--accent)}
+  #cmpTable td.best{background:rgba(245,166,35,.15);color:var(--accent);font-weight:700}
+  #cmpTable tr.sep td,#cmpTable tr.sep th{border-bottom:1px solid var(--line)}
+  #cmpTable .rk{display:inline-grid;place-items:center;width:17px;height:17px;
+    border-radius:50%;font:800 10.5px/1 inherit;color:#111;margin-right:4px}
+  #cmpTable .mv{padding:1px 5px;margin:0 1px;cursor:pointer;font:600 10px/1.4 inherit;
+    color:var(--dim);background:rgba(255,255,255,.07);border:1px solid var(--line);
+    border-radius:5px}
+  #cmpTable .mv:hover{color:var(--txt)}
+
+  @media (max-width:980px){
+    #ctl{max-height:36vh}
+    #info{width:240px}
+    #head{width:240px}
+    #wish,#cmp{max-width:calc(100vw - 32px);width:calc(100vw - 32px)}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="panel" id="head">
+  <h2>前滩尚品 · 3D 一房一价</h2>
+  <div class="sub">南 → 北：11幢 · 8幢 · 5幢 &nbsp;|&nbsp; 冬至(9–15时)日照时长</div>
+  <div class="bar">
+    <div class="kpi"><b id="kpiAvg">–</b><span>均价 元/m²</span></div>
+    <div class="kpi"><b id="kpiCnt">–</b><span>可售套数</span></div>
+    <div class="kpi"><b id="kpiArea">–</b><span>总建面 m²</span></div>
+  </div>
+</div>
+
+<div class="panel" id="ctl">
+  <h3>着色维度</h3>
+  <div class="seg" id="modes">
+    <button data-m="price" class="on">单价</button>
+    <button data-m="total">总价</button>
+    <button data-m="sun">日照时长</button>
+    <button data-m="diff">楼层价差</button>
+    <button data-m="area" class="wide">建筑面积</button>
+  </div>
+
+  <div id="legend">
+    <h3 id="legendTitle">图例</h3>
+    <div id="ramp"></div>
+    <div id="rampTicks"><span></span><span></span></div>
+    <div id="swatches"></div>
+  </div>
+
+  <hr>
+  <h3>筛选</h3>
+  <div class="row"><label>总价上限</label><output id="oBudget"></output></div>
+  <input type="range" id="budget" min="860" max="1190" step="5" value="1190">
+  <div class="row"><label>日照下限</label><output id="oSun"></output></div>
+  <input type="range" id="sunMin" min="2" max="5.5" step="0.5" value="2">
+  <div class="sub" style="margin:4px 0 8px">不满足条件的房源变为半透明</div>
+
+  <hr>
+  <h3>显示</h3>
+  <div id="bldgChks"></div>
+  <label class="chk"><input type="checkbox" id="cLabel" checked> 楼栋 / 单元标签</label>
+  <label class="chk"><input type="checkbox" id="cFloor" checked> 楼层刻度</label>
+  <label class="chk"><input type="checkbox" id="cGhost" checked> 非住宅基座（1层，无定价）</label>
+  <label class="chk"><input type="checkbox" id="cSunRay" checked> 冬至日照方向示意</label>
+  <div class="sub" style="margin:2px 0 0 22px">☀ 正南 · 高度角≈35°（上海冬至正午）</div>
+
+  <hr>
+  <h3>视角</h3>
+  <div class="seg" id="views">
+    <button data-v="iso">东南鸟瞰</button>
+    <button data-v="front">正南视角</button>
+    <button data-v="side">东侧剖视</button>
+    <button data-v="top">俯视总平</button>
+  </div>
+  <div class="sub" style="border-top:1px solid var(--line);padding-top:10px">
+    拖拽旋转 · 滚轮缩放 · 右键平移 · 单击选中房源<br>
+    <kbd>W</kbd> 加入/移出意向 &nbsp; <kbd>C</kbd> 对比 &nbsp; <kbd>Esc</kbd> 取消
+  </div>
+</div>
+
+<div class="panel" id="info">
+  <div id="infoBody"></div>
+</div>
+
+<div class="panel" id="wish">
+  <div id="wishChips"></div>
+  <div class="act">
+    <button id="wOnly" title="只显示已标记的意向房源">只看意向</button>
+    <button id="wCmp" title="在意向范围内逐项对比">对比</button>
+    <button id="wClear" title="清空意向清单">清空</button>
+  </div>
+</div>
+
+<div id="cmp">
+  <div class="cmpHead">
+    <b>意向房源对比</b>
+    <span class="meta" id="cmpMeta"></span>
+    <button id="cmpLink">复制分享链接</button>
+    <button id="cmpCopy">复制为表格</button>
+    <button id="cmpClose">关闭</button>
+  </div>
+  <div class="cmpBody"><table id="cmpTable"></table></div>
+</div>
+
+<div id="tip"></div>
+
+<script>/*__THREE__*/</script>
+<script>/*__ORBIT__*/</script>
+<script>const RAW=/*__DATA__*/;</script>
+<script>
+(function(){
+'use strict';
+
+/* ================= 数据整理 =================
+   RAW 字段: b楼栋 u单元 rm室号 fr实际层 fn名义层 a面积 p单价 t总价 d楼层价差 s日照 note备注 */
+const BLDG_ORDER = [];
+const bmap = new Map();
+RAW.forEach(function(d){
+  if(!bmap.has(d.b)){
+    bmap.set(d.b, {name:d.b, cols:[], colKey:new Set(), floors:new Set()});
+    BLDG_ORDER.push(bmap.get(d.b));
+  }
+  const B = bmap.get(d.b), k = d.u + d.rm;
+  if(!B.colKey.has(k)){ B.colKey.add(k); B.cols.push({u:d.u, rm:d.rm, key:k}); }
+  B.floors.add(d.fr);
+});
+BLDG_ORDER.forEach(function(B){
+  B.floorList = Array.from(B.floors).sort(function(a,b){ return b - a; });
+});
+
+/* 场地排布：从南到北依次 11幢 → 8幢 → 5幢。
+   与日照数据吻合：11幢 全部 5.5h（南侧无遮挡）→ 8幢 仅 1~2 层轻微削减 → 5幢 2~4 层明显遮挡。
+   楼栋间距与朝向为示意值，未取得项目总平面图。 */
+const S2N = ['11幢', '8幢', '5幢'];
+const ROWS = S2N.map(function(n){ return bmap.get(n); })
+  .filter(function(x){ return x; })
+  .concat(BLDG_ORDER.filter(function(B){ return S2N.indexOf(B.name) < 0; }));
+
+function keyOf(d){ return d.b + '|' + d.u + '|' + d.rm + '|' + d.fr; }
+const cell = new Map();
+RAW.forEach(function(d){ cell.set(keyOf(d), d); });
+const valid = RAW.filter(function(d){ return d.p != null; });
+
+ROWS.forEach(function(B){
+  B.cols.forEach(function(c){
+    const ps = B.floorList.map(function(f){
+      const r = cell.get(B.name+'|'+c.u+'|'+c.rm+'|'+f);
+      return r && r.p;
+    }).filter(function(x){ return x; });
+    c.avg = Math.round(ps.reduce(function(s,x){ return s + x; }, 0) / ps.length);
+    c.n = ps.length;
+  });
+});
+
+const EXT = {
+  price:[Math.min.apply(null, valid.map(function(d){return d.p;})), Math.max.apply(null, valid.map(function(d){return d.p;}))],
+  total:[Math.min.apply(null, valid.map(function(d){return d.t;})), Math.max.apply(null, valid.map(function(d){return d.t;}))],
+  area :[Math.min.apply(null, valid.map(function(d){return d.a;})), Math.max.apply(null, valid.map(function(d){return d.a;}))],
+  diff :[-4000, 7000]
+};
+const SUM_AREA  = valid.reduce(function(s,d){ return s + d.a; }, 0);
+const SUM_MONEY = valid.reduce(function(s,d){ return s + d.t; }, 0);
+
+/* ================= 配色 ================= */
+const RAMP = ['#1c4e8a','#2f8fc4','#63c9a8','#ffd86b','#f3903f','#c9302c'];
+const SUN_COLOR = {5.5:'#c00000',5:'#e62e2e',4.5:'#f06018',4:'#f08c1e',3.5:'#f5b41e',3:'#ffd21e',2.5:'#b5cc18',2:'#6ba81e'};
+const DIVERGE = ['#2c7bb6','#9fc8de','#eceff1','#ea9a8c','#c1272d'];
+
+function hex2rgb(h){ return [parseInt(h.substr(1,2),16), parseInt(h.substr(3,2),16), parseInt(h.substr(5,2),16)]; }
+function rgb2hex(a){ return '#' + a.map(function(v){ return ('0'+Math.round(v).toString(16)).slice(-2); }).join(''); }
+function ramp(stops, t){
+  t = Math.max(0, Math.min(1, t));
+  const x = t * (stops.length - 1), i = Math.min(Math.floor(x), stops.length - 2), f = x - i;
+  const a = hex2rgb(stops[i]), b = hex2rgb(stops[i+1]);
+  return rgb2hex([a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f]);
+}
+function colorOf(d, mode){
+  if(d.p == null) return '#3a4250';
+  if(mode === 'sun') return SUN_COLOR[d.s] || '#888';
+  if(mode === 'diff'){
+    if(d.d == null) return '#4a5261';
+    const m = 7000;
+    return ramp(DIVERGE, (Math.max(-m, Math.min(m, d.d)) + m) / (2*m));
+  }
+  const key = mode === 'total' ? 't' : (mode === 'area' ? 'a' : 'p');
+  const e = EXT[mode] || EXT.price;
+  return ramp(RAMP, (d[key] - e[0]) / (e[1] - e[0]));
+}
+
+const fmtI = function(n){ return Math.round(n).toLocaleString('zh-CN'); };
+const fmt2 = function(n){ return n.toLocaleString('zh-CN',{minimumFractionDigits:2, maximumFractionDigits:2}); };
+const fmtD = function(d){ return d == null ? '—' : (d >= 0 ? '↑' : '↓') + fmtI(Math.abs(d)); };
+
+/* ================= 场景 =================
+   单套盒子 3.35(东西) × 1.55(层高) × 4.0(进深)；ZGAP 为南北楼间距（示意） */
+const UW = 3.35, UH = 1.55, UD = 4.0, GX = 0.16, GY = 0.18, GU = 0.55, ZGAP = 13.0;
+
+const wrap = document.getElementById('app');
+const scene = new THREE.Scene();
+scene.background = null;                            // 透出 CSS 渐变天空
+scene.fog = new THREE.Fog('#131922', 150, 330);
+
+const camera = new THREE.PerspectiveCamera(34, innerWidth/innerHeight, 0.1, 1200);
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+wrap.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI/2 - 0.03;
+controls.minDistance = 14; controls.maxDistance = 340;
+
+scene.add(new THREE.HemisphereLight('#9fc5e8', '#161b23', 0.7));
+/* 主光 = 上海冬至正午太阳：正南方位，高度角约 35°（90 − 31.2 − 23.4）。
+   因此阴影向北投射，直观解释 8幢 / 5幢 低层的日照衰减。 */
+const SUN_ALT = 35.4 * Math.PI/180, SUN_R = 110;
+const SUN_POS = new THREE.Vector3(0, Math.sin(SUN_ALT)*SUN_R, Math.cos(SUN_ALT)*SUN_R);
+const sun = new THREE.DirectionalLight('#fff1d6', 1.25);
+sun.position.copy(SUN_POS);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0008;
+const sc = sun.shadow.camera;
+sc.left = -46; sc.right = 46; sc.top = 54; sc.bottom = -54; sc.near = 1; sc.far = 320;
+scene.add(sun);
+const fill = new THREE.DirectionalLight('#5b7fa8', 0.34);
+fill.position.set(58, 34, -72);
+scene.add(fill);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(260, 260),
+  new THREE.MeshStandardMaterial({color:'#12171f', roughness:.95, metalness:0})
+);
+ground.rotation.x = -Math.PI/2; ground.position.y = -0.34; ground.receiveShadow = true;
+scene.add(ground);
+const grid = new THREE.GridHelper(260, 52, 0x2a3240, 0x1b212a);
+grid.position.y = -0.33; scene.add(grid);
+
+/* ---- 文字标签 ---- */
+function makeLabel(text, o){
+  o = o || {};
+  const fs = o.fs || 46, pad = o.bg ? 18 : 6;
+  const cv = document.createElement('canvas'), ctx = cv.getContext('2d');
+  const font = (o.weight || 700) + ' ' + fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.font = font;
+  cv.width = Math.ceil(ctx.measureText(text).width) + pad*2;
+  cv.height = fs + pad*2;
+  ctx.font = font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if(o.bg){
+    ctx.fillStyle = o.bg;
+    const r = 14, w = cv.width, h = cv.height;
+    ctx.beginPath();
+    ctx.moveTo(r,0); ctx.lineTo(w-r,0); ctx.quadraticCurveTo(w,0,w,r);
+    ctx.lineTo(w,h-r); ctx.quadraticCurveTo(w,h,w-r,h); ctx.lineTo(r,h);
+    ctx.quadraticCurveTo(0,h,0,h-r); ctx.lineTo(0,r); ctx.quadraticCurveTo(0,0,r,0);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = o.color || '#fff';
+  ctx.fillText(text, cv.width/2, cv.height/2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map:tex, transparent:true, depthTest:o.depthTest !== false, depthWrite:false
+  }));
+  const s = o.scale || 1.6;
+  sp.scale.set(cv.width/cv.height*s, s, 1);
+  return sp;
+}
+
+/* ---- 建楼：东西向排房号，南北向排楼栋 ---- */
+const unitGeo = new THREE.BoxGeometry(UW, UH, UD);
+const edgeGeo = new THREE.EdgesGeometry(unitGeo);
+const meshes = [];
+const labelGroup = new THREE.Group(), floorGroup = new THREE.Group(), podGroup = new THREE.Group();
+scene.add(labelGroup, floorGroup, podGroup);
+
+const widths = ROWS.map(function(B){
+  const nU = new Set(B.cols.map(function(c){ return c.u; })).size;
+  return B.cols.length*UW + (B.cols.length-1)*GX + (nU-1)*GU;
+});
+const rowStep = UD + ZGAP;
+let zCursor = (ROWS.length - 1) * rowStep / 2;        // 南在 +Z，北在 -Z
+
+ROWS.forEach(function(B, bi){
+  B.width = widths[bi];
+  B.x0 = -B.width/2;                                  // 每栋各自沿东西居中
+  B.z = zCursor;
+  zCursor -= rowStep;
+
+  const g = new THREE.Group();
+  g.name = B.name;
+  B.group = g;
+  scene.add(g);
+
+  let lx = 0, prevU = null;
+  B.cols.forEach(function(c){
+    if(prevU !== null && c.u !== prevU) lx += GU;
+    c.x = B.x0 + lx + UW/2;
+    lx += UW + GX;
+    prevU = c.u;
+  });
+
+  const yTop = (Math.max.apply(null, B.floorList) - 1) * (UH+GY) + UH;
+  const minF = Math.min.apply(null, B.floorList);
+
+  // 地坪台座（沉在 0 以下，不影响楼层高度）
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(B.width + 5, 0.3, UD + 5),
+    new THREE.MeshStandardMaterial({color:'#1b2129', roughness:.85, metalness:.1})
+  );
+  plate.position.set(0, -0.15, B.z);
+  plate.receiveShadow = true;
+  B.plate = plate;
+  scene.add(plate);
+
+  // 非住宅基座（5幢 / 11幢 最低住宅层为 2 层）
+  if(minF > 1){
+    const h = (minF - 1) * (UH + GY) - GY;
+    const pod = new THREE.Mesh(
+      new THREE.BoxGeometry(B.width + 0.5, h, UD + 0.5),
+      new THREE.MeshStandardMaterial({color:'#252c37', roughness:.9, metalness:.05})
+    );
+    pod.position.set(0, h/2, B.z);
+    pod.castShadow = pod.receiveShadow = true;
+    podGroup.add(pod);
+  }
+
+  B.cols.forEach(function(c){
+    B.floorList.forEach(function(f){
+      const d = cell.get(B.name+'|'+c.u+'|'+c.rm+'|'+f);
+      const y = (f-1)*(UH+GY) + UH/2;
+      if(!d || d.p == null){
+        const ghost = new THREE.Mesh(unitGeo, new THREE.MeshStandardMaterial({
+          color:'#2b323d', transparent:true, opacity:.22, roughness:1
+        }));
+        ghost.position.set(c.x, y, B.z);
+        g.add(ghost);
+        const gl = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({
+          color:0x5a6472, transparent:true, opacity:.5
+        }));
+        gl.position.copy(ghost.position);
+        g.add(gl);
+        return;
+      }
+      const m = new THREE.Mesh(unitGeo, new THREE.MeshStandardMaterial({
+        color:colorOf(d,'price'), roughness:.42, metalness:.12, transparent:true, opacity:1
+      }));
+      m.position.set(c.x, y, B.z);
+      m.castShadow = m.receiveShadow = true;
+      m.userData = {d:d, B:B, c:c, base:new THREE.Color(colorOf(d,'price'))};
+      g.add(m);
+      meshes.push(m);
+      const ln = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({
+        color:0x0e1116, transparent:true, opacity:.45
+      }));
+      ln.position.copy(m.position);
+      g.add(ln);
+      m.userData.edge = ln;
+    });
+  });
+
+  // 楼栋名（带南北位序）
+  const pos = bi === 0 ? ' · 最南' : (bi === ROWS.length - 1 ? ' · 最北' : ' · 中');
+  const bl = makeLabel(B.name + pos, {fs:60, scale:2.2, bg:'rgba(0,118,158,.94)', depthTest:false});
+  bl.position.set(0, yTop + 2.6, B.z);
+  labelGroup.add(bl);
+
+  // 单元名（贴南立面前方）
+  const byU = {};
+  B.cols.forEach(function(c){ (byU[c.u] = byU[c.u] || []).push(c.x); });
+  Object.keys(byU).forEach(function(u){
+    const xs = byU[u];
+    const ul = makeLabel(u, {fs:40, scale:1.55, bg:'rgba(245,166,35,.94)', color:'#231a06'});
+    ul.position.set((Math.min.apply(null,xs)+Math.max.apply(null,xs))/2, 0.8, B.z + UD/2 + 2.4);
+    labelGroup.add(ul);
+  });
+
+  // 楼层刻度（西侧，实际层 / 名义层）
+  const hd = makeLabel('实际 / 名义', {fs:26, scale:.95, color:'#6f7b8c', weight:500});
+  hd.position.set(B.x0 - 2.3, yTop + 0.9, B.z);
+  floorGroup.add(hd);
+  B.floorList.forEach(function(f){
+    const rec = B.cols.map(function(c){ return cell.get(B.name+'|'+c.u+'|'+c.rm+'|'+f); })
+                      .filter(function(x){ return x; })[0];
+    const fl = makeLabel(f + ' / ' + (rec ? rec.fn : f),
+      {fs:28, scale:1.0, color:'#98a3b3', weight:600});
+    fl.position.set(B.x0 - 2.3, (f-1)*(UH+GY) + UH/2, B.z);
+    floorGroup.add(fl);
+  });
+});
+
+/* ---- 指北针 ---- */
+const siteHalfW = Math.max.apply(null, widths) / 2;
+const compass = new THREE.Group();
+const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.6, 4),
+  new THREE.MeshStandardMaterial({color:'#e0473c', roughness:.5}));
+arrow.rotation.x = -Math.PI/2;                        // 指向 -Z = 北
+arrow.position.set(0, 0.2, -3.3);
+const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 4.4),
+  new THREE.MeshStandardMaterial({color:'#6f7b8c', roughness:.7}));
+shaft.position.set(0, 0.2, 0);
+const ring = new THREE.Mesh(new THREE.RingGeometry(3.1, 3.4, 48),
+  new THREE.MeshBasicMaterial({color:0x3b4554, side:THREE.DoubleSide}));
+ring.rotation.x = -Math.PI/2; ring.position.y = -0.3;
+const nL = makeLabel('北 N', {fs:34, scale:1.4, color:'#e6eaf0', depthTest:false});
+nL.position.set(0, 1.6, -5.0);
+const sL = makeLabel('南 S', {fs:28, scale:1.05, color:'#7d8899', depthTest:false});
+sL.position.set(0, 1.2, 4.2);
+compass.add(arrow, shaft, ring, nL, sL);
+// 放在场地东南角外侧——默认东南鸟瞰视角下这里是空白区，不会被左右面板压住
+compass.position.set(siteHalfW + 9, 0, ROWS[0].z + 11);
+scene.add(compass);
+
+/* ---- 冬至正午日照方向示意（沿真实光线方向） ---- */
+const sunViz = new THREE.Group();
+const sunDir = SUN_POS.clone().normalize();
+const sunAt = sunDir.clone().multiplyScalar(48);
+const disc = new THREE.Mesh(new THREE.SphereGeometry(1.15, 20, 16),
+  new THREE.MeshBasicMaterial({color:0xffe9a8}));
+disc.position.copy(sunAt);
+sunViz.add(disc);
+[-9, 0, 9].forEach(function(dx){
+  const a = sunAt.clone().setX(dx);
+  const b = a.clone().add(sunDir.clone().multiplyScalar(-52));
+  const l = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([a, b]),
+    new THREE.LineDashedMaterial({color:0xffd98a, dashSize:1.5, gapSize:1.1,
+      transparent:true, opacity:dx ? .28 : .5})
+  );
+  l.computeLineDistances();
+  sunViz.add(l);
+});
+scene.add(sunViz);
+
+/* ================= 交互 ================= */
+const ray = new THREE.Raycaster(), pointer = new THREE.Vector2();
+let hovered = null, selected = null;
+const tipEl = document.getElementById('tip');
+let mode = 'price', budget = 1190, sunMin = 2;
+const hiddenB = new Set();
+
+function passes(d){ return d.t <= budget + 1e-6 && d.s >= sunMin - 1e-6; }
+
+function applyStyle(){
+  meshes.forEach(function(m){
+    const d = m.userData.d;
+    const rk = rankOf(d);
+    const on = !hiddenB.has(d.b) && (!onlyWish || rk > 0);
+    m.visible = on;
+    m.userData.edge.visible = on;
+    if(!on) return;
+    const col = colorOf(d, mode);
+    m.userData.base.set(col);
+    const ok = rk > 0 || passes(d);          // 已标记意向的房源不受筛选淡化
+    m.material.color.set(m === hovered ? '#ffffff' : col);
+    m.material.opacity = ok ? 1 : 0.13;
+    m.material.transparent = !ok || m.material.opacity < 1;
+    m.material.emissive.set(m === selected ? '#ffb300' : '#000000');
+    m.material.emissiveIntensity = m === selected ? 0.55 : 0;
+    m.userData.edge.material.opacity = ok ? .45 : .1;
+  });
+  wishGroup.children.forEach(function(o){ o.visible = !hiddenB.has(o.userData.b); });
+  updateLegend();
+}
+
+function tipHTML(d){
+  const rk = rankOf(d);
+  return '<div class="t">' + (rk ? '<span style="color:' + rankColor(rk) + '">第' + rk + '意向 · </span>' : '') +
+    d.b + ' ' + d.u + ' ' + d.rm + '　' + d.fr +
+    '层<span style="color:#8b96a6">(名义' + d.fn + '层)</span></div>' +
+    '<div class="p">' + fmtI(d.p) + ' 元/m²　总价 ' + fmt2(d.t) + ' 万</div>' +
+    '<div class="s">' + fmt2(d.a) + ' m²　楼层价差 ' + fmtD(d.d) + '　日照 ' + d.s + ' 小时</div>';
+}
+
+renderer.domElement.addEventListener('pointermove', function(e){
+  pointer.x = (e.clientX/innerWidth)*2 - 1;
+  pointer.y = -(e.clientY/innerHeight)*2 + 1;
+  ray.setFromCamera(pointer, camera);
+  const hit = ray.intersectObjects(meshes.filter(function(m){ return m.visible; }), false)[0];
+  const t = hit ? hit.object : null;
+  if(t !== hovered){ hovered = t; applyStyle(); }
+  if(t){
+    tipEl.innerHTML = tipHTML(t.userData.d);
+    tipEl.style.opacity = 1;
+    const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    tipEl.style.left = Math.min(e.clientX + 16, innerWidth - w - 10) + 'px';
+    tipEl.style.top  = Math.max(10, e.clientY - h - 14) + 'px';
+    renderer.domElement.style.cursor = 'pointer';
+  }else{
+    tipEl.style.opacity = 0;
+    renderer.domElement.style.cursor = '';
+  }
+});
+renderer.domElement.addEventListener('pointerup', function(){
+  ray.setFromCamera(pointer, camera);
+  const hit = ray.intersectObjects(meshes.filter(function(m){ return m.visible; }), false)[0];
+  select(hit ? hit.object : null);
+});
+addEventListener('keydown', function(e){
+  if(e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if(e.key === 'Escape'){ if(cmpOpen) setCmp(false); else select(null); return; }
+  const k = e.key.toLowerCase();
+  if(k === 'w' && selected){ wishToggle(selected.userData.d); return; }
+  if(k === 'c'){ setCmp(!cmpOpen); }
+});
+
+function select(m){ selected = m; applyStyle(); renderInfo(); }
+
+/* ================= 购房意向（排名标记 + 范围对比） ================= */
+const WISH_KEY = 'qtsp.wish.v1';
+const meshByKey = new Map();
+meshes.forEach(function(m){ meshByKey.set(keyOf(m.userData.d), m); });
+
+const colAvgOf = new Map();
+ROWS.forEach(function(B){
+  B.cols.forEach(function(c){
+    B.floorList.forEach(function(f){ colAvgOf.set(B.name+'|'+c.u+'|'+c.rm+'|'+f, c.avg); });
+  });
+});
+const PROJ_AVG = SUM_MONEY * 10000 / SUM_AREA;
+
+let wish = [];            // 按名次排列的房源 key
+let onlyWish = false;
+let cmpOpen = false;
+
+try{
+  const saved = JSON.parse(localStorage.getItem(WISH_KEY) || '[]');
+  if(Array.isArray(saved)) wish = saved.filter(function(k){ return meshByKey.has(k); });
+}catch(err){ wish = []; }
+
+function saveWish(){
+  try{ localStorage.setItem(WISH_KEY, JSON.stringify(wish)); }catch(err){}
+}
+function rankOf(d){ return wish.indexOf(keyOf(d)) + 1; }
+function rankColor(n){
+  return n === 1 ? '#ffd23f' : n === 2 ? '#cfd8e3' : n === 3 ? '#e0913c' : '#3fb6d8';
+}
+function wishToggle(d){
+  const k = keyOf(d), i = wish.indexOf(k);
+  if(i < 0) wish.push(k); else wish.splice(i, 1);
+  if(!wish.length){ onlyWish = false; setCmp(false); }
+  refreshWish();
+}
+function wishRemove(k){
+  const i = wish.indexOf(k);
+  if(i < 0) return;
+  wish.splice(i, 1);
+  if(!wish.length){ onlyWish = false; setCmp(false); }
+  refreshWish();
+}
+function wishMove(k, dir){
+  const i = wish.indexOf(k), j = i + dir;
+  if(i < 0 || j < 0 || j >= wish.length) return;
+  wish[i] = wish[j]; wish[j] = k;
+  refreshWish();
+}
+function refreshWish(){
+  saveWish(); buildWishMarks(); renderChips(); applyStyle(); renderInfo();
+  if(cmpOpen) renderCmp();
+}
+
+/* ---- 3D 标记：名次徽章 + 描边 ---- */
+const wishGroup = new THREE.Group();
+scene.add(wishGroup);
+const outlineGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(UW*1.07, UH*1.18, UD*1.07));
+
+function makeRankBadge(n, color){
+  const S = 96, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  c.beginPath(); c.arc(S/2, S/2, S/2 - 5, 0, Math.PI*2);
+  c.fillStyle = color; c.fill();
+  c.lineWidth = 6; c.strokeStyle = 'rgba(10,14,20,.9)'; c.stroke();
+  c.fillStyle = '#10141a';
+  c.font = '800 ' + (n > 9 ? 42 : 54) + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(String(n), S/2, S/2 + 2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map:tex, transparent:true, depthTest:false, depthWrite:false
+  }));
+  sp.scale.set(1.55, 1.55, 1);
+  return sp;
+}
+function buildWishMarks(){
+  while(wishGroup.children.length){
+    const o = wishGroup.children.pop();
+    if(o.material){
+      if(o.material.map) o.material.map.dispose();
+      o.material.dispose();
+    }
+  }
+  wish.forEach(function(k, i){
+    const m = meshByKey.get(k);
+    if(!m) return;
+    const col = rankColor(i+1), b = m.userData.d.b;
+    const ol = new THREE.LineSegments(outlineGeo, new THREE.LineBasicMaterial({
+      color:new THREE.Color(col), transparent:true, opacity:.95
+    }));
+    ol.position.copy(m.position);
+    ol.userData.b = b;
+    wishGroup.add(ol);
+    const bg = makeRankBadge(i+1, col);
+    bg.position.set(m.position.x, m.position.y, m.position.z + UD/2 + 0.6);
+    bg.userData.b = b;
+    wishGroup.add(bg);
+  });
+}
+
+/* ---- 底部意向条 ---- */
+function renderChips(){
+  const box = document.getElementById('wishChips');
+  if(!wish.length){
+    box.innerHTML = '<span class="hint">选中一套房源后按 <b style="color:#e8ecf2">W</b>' +
+      '（或点右侧「加入意向」），加入顺序即为第 1、2、3… 名</span>';
+  }else{
+    box.innerHTML = wish.map(function(k, i){
+      const d = cell.get(k);
+      return '<span class="chip" data-k="' + k + '" title="点击定位，✕ 移出">' +
+        '<i style="background:' + rankColor(i+1) + '">' + (i+1) + '</i>' +
+        d.b + ' ' + d.u.replace('号','') + '-' + d.rm.replace('室','') + ' · ' + d.fr + '层' +
+        '<em class="x">✕</em></span>';
+    }).join('');
+  }
+  document.getElementById('wOnly').classList.toggle('on', onlyWish);
+  document.getElementById('wCmp').textContent = wish.length > 1 ? '对比 ' + wish.length + ' 套' : '对比';
+}
+document.getElementById('wishChips').onclick = function(e){
+  const chip = e.target.closest('.chip');
+  if(!chip) return;
+  const k = chip.dataset.k;
+  if(e.target.classList.contains('x')){ wishRemove(k); return; }
+  const m = meshByKey.get(k);
+  if(m){ hiddenB.delete(m.userData.d.b); syncChks(); select(m); flyTo(m); }
+};
+document.getElementById('wOnly').onclick = function(){
+  if(!wish.length) return;
+  onlyWish = !onlyWish;
+  renderChips(); applyStyle();
+};
+document.getElementById('wCmp').onclick = function(){ setCmp(!cmpOpen); };
+document.getElementById('wClear').onclick = function(){
+  if(!wish.length) return;
+  if(!confirm('清空全部 ' + wish.length + ' 套意向房源？')) return;
+  wish = []; onlyWish = false; setCmp(false); refreshWish();
+};
+
+/* ---- 意向范围内对比 ---- */
+const CMP_ROWS = [
+  {k:'单价 元/m²',    v:function(d){ return d.p; },                 f:fmtI, best:'min'},
+  {k:'总价 万元',     v:function(d){ return d.t; },                 f:fmt2, best:'min'},
+  {k:'98折参考 万元',  v:function(d){ return d.t*0.98; },            f:fmt2, best:'min'},
+  {k:'建筑面积 m²',   v:function(d){ return d.a; },                 f:fmt2, best:'max'},
+  {k:'日照 小时',     v:function(d){ return d.s; },                 f:function(x){ return x + ' h'; }, best:'max'},
+  {k:'vs 本期均价',   v:function(d){ return d.p/PROJ_AVG - 1; },
+   f:function(x){ return (x >= 0 ? '+' : '') + (x*100).toFixed(1) + '%'; }, best:'min'},
+  {k:'实际 / 名义层',  txt:function(d){ return d.fr + ' / ' + d.fn + ' 层'; }},
+  {k:'场地位置',      txt:function(d){
+     const i = ROWS.indexOf(bmap.get(d.b));
+     return i === 0 ? '最南' : (i === ROWS.length - 1 ? '最北' : '中'); }},
+  {k:'楼层单价差',    txt:function(d){ return fmtD(d.d); }},
+  {k:'整列均价',      txt:function(d){ return fmtI(colAvgOf.get(keyOf(d))); }}
+];
+
+function setCmp(v){
+  cmpOpen = !!v && wish.length > 0;
+  document.getElementById('cmp').classList.toggle('show', cmpOpen);
+  document.getElementById('wCmp').classList.toggle('on', cmpOpen);
+  if(cmpOpen) renderCmp();
+}
+function renderCmp(){
+  const t = document.getElementById('cmpTable');
+  const ds = wish.map(function(k){ return cell.get(k); }).filter(function(x){ return x; });
+  document.getElementById('cmpMeta').textContent =
+    ds.length ? ds.length + ' 套 · 金色 = 该指标在意向范围内最优' : '';
+  if(!ds.length){ t.innerHTML = '<tr><th class="k">暂无意向房源</th></tr>'; return; }
+
+  let head = '<thead><tr><th class="k">指标</th>';
+  ds.forEach(function(d, i){
+    const k = keyOf(d);
+    head += '<th data-k="' + k + '" title="点击定位该房源">' +
+      '<span class="rk" style="background:' + rankColor(i+1) + '">' + (i+1) + '</span>' +
+      d.b + ' ' + d.u + d.rm +
+      '<div style="font-weight:500;color:#8b96a6;font-size:11px;margin-top:2px">' + d.fr + '层　' +
+      '<button class="mv" data-mv="-1" data-k="' + k + '" title="升一名">▲</button>' +
+      '<button class="mv" data-mv="1" data-k="' + k + '" title="降一名">▼</button>' +
+      '<button class="mv" data-rm="' + k + '" title="移出">✕</button></div></th>';
+  });
+  head += '</tr></thead>';
+
+  let body = '<tbody>';
+  CMP_ROWS.forEach(function(r, ri){
+    const vals = r.v ? ds.map(r.v) : null;
+    let bestVal = null;
+    if(vals && r.best && ds.length > 1){
+      bestVal = r.best === 'min' ? Math.min.apply(null, vals) : Math.max.apply(null, vals);
+    }
+    body += '<tr' + (ri === 5 ? ' class="sep"' : '') + '><th class="k">' + r.k + '</th>';
+    ds.forEach(function(d, i){
+      const isBest = bestVal !== null && Math.abs(vals[i] - bestVal) < 1e-9;
+      body += '<td class="' + (isBest ? 'best' : '') + '">' +
+        (r.v ? r.f(vals[i]) : r.txt(d)) + '</td>';
+    });
+    body += '</tr>';
+  });
+  body += '</tbody>';
+  t.innerHTML = head + body;
+}
+document.getElementById('cmpTable').onclick = function(e){
+  const mv = e.target.closest('.mv');
+  if(mv){
+    if(mv.dataset.rm) wishRemove(mv.dataset.rm);
+    else wishMove(mv.dataset.k, +mv.dataset.mv);
+    return;
+  }
+  const th = e.target.closest('thead th[data-k]');
+  if(th){
+    const m = meshByKey.get(th.dataset.k);
+    if(m){ select(m); flyTo(m); }
+  }
+};
+document.getElementById('cmpClose').onclick = function(){ setCmp(false); };
+document.getElementById('cmpCopy').onclick = function(){
+  const rows = Array.prototype.map.call(
+    document.getElementById('cmpTable').querySelectorAll('tr'),
+    function(tr){
+      return Array.prototype.map.call(tr.children, function(c){
+        return c.innerText.replace(/[▲▼✕]/g, '').replace(/\s+/g, ' ').trim();
+      }).join('\t');
+    }).join('\n');
+  const btn = document.getElementById('cmpCopy'), old = btn.textContent;
+  (navigator.clipboard ? navigator.clipboard.writeText(rows) : Promise.reject())
+    .then(function(){ btn.textContent = '已复制 ✓'; })
+    .catch(function(){ btn.textContent = '复制失败'; })
+    .then(function(){ setTimeout(function(){ btn.textContent = old; }, 1500); });
+};
+
+/* ================= 面板 ================= */
+function sunPill(s){
+  return '<span class="sunpill" style="background:' + (SUN_COLOR[s] || '#888') +
+    (s <= 4 ? ';color:#1a1a1a' : '') + '">☀ 日照 ' + s + ' 小时</span>';
+}
+
+function priceCurve(B, c, curF){
+  const pts = B.floorList.slice().sort(function(a,b){ return a - b; }).map(function(f){
+    const r = cell.get(B.name+'|'+c.u+'|'+c.rm+'|'+f);
+    return r && r.p ? {f:f, p:r.p} : null;
+  }).filter(function(x){ return x; });
+  if(pts.length < 2) return '';
+  const W = 256, H = 112, PL = 6, PR = 6, PT = 10, PB = 18;
+  const fs = pts.map(function(o){ return o.f; }), ps = pts.map(function(o){ return o.p; });
+  const fmin = Math.min.apply(null,fs), fmax = Math.max.apply(null,fs);
+  const pmin = Math.min.apply(null,ps), pmax = Math.max.apply(null,ps);
+  const X = function(f){ return PL + (f-fmin)/(fmax-fmin)*(W-PL-PR); };
+  const Y = function(p){ return PT + (1-(p-pmin)/(pmax-pmin||1))*(H-PT-PB); };
+  let path = '', dots = '';
+  pts.forEach(function(o,i){
+    path += (i ? 'L' : 'M') + X(o.f).toFixed(1) + ' ' + Y(o.p).toFixed(1) + ' ';
+    const cur = o.f === curF;
+    dots += '<circle cx="' + X(o.f).toFixed(1) + '" cy="' + Y(o.p).toFixed(1) + '" r="' +
+      (cur ? 4.2 : 2.2) + '" fill="' + (cur ? '#f5a623' : '#3fb6d8') + '"' +
+      (cur ? ' stroke="#fff" stroke-width="1.4"' : '') + '/>';
+  });
+  return '<svg id="chart" viewBox="0 0 ' + W + ' ' + H + '">' +
+    '<path d="' + path + '" fill="none" stroke="#3fb6d8" stroke-width="1.8" stroke-linejoin="round"/>' +
+    dots +
+    '<text x="' + PL + '" y="' + (H-5) + '" fill="#8b96a6" font-size="9">' + fmin + '层</text>' +
+    '<text x="' + (W-PR) + '" y="' + (H-5) + '" fill="#8b96a6" font-size="9" text-anchor="end">' + fmax + '层</text>' +
+    '<text x="' + PL + '" y="8" fill="#8b96a6" font-size="9">' + fmtI(pmax) + '</text>' +
+    '</svg>';
+}
+
+function colBars(B){
+  const mx = Math.max.apply(null, B.cols.map(function(c){ return c.avg; }));
+  const mn = Math.min.apply(null, B.cols.map(function(c){ return c.avg; }));
+  return '<div class="colbars">' + B.cols.map(function(c){
+    const w = 18 + (c.avg-mn)/((mx-mn)||1)*82;
+    return '<div class="colbar"><em>' + c.u + c.rm + '</em><u><i style="width:' + w.toFixed(1) +
+      '%;background:' + ramp(RAMP, (c.avg-EXT.price[0])/(EXT.price[1]-EXT.price[0])) + '"></i></u>' +
+      '<b>' + fmtI(c.avg) + '</b></div>';
+  }).join('') + '</div>';
+}
+
+const FLAGS = [
+  {k:'5幢|9号|01室|9',  t:'<b>5幢 9号01室 9层</b>：单价 106,150、价差 −3,633，同层其余三户均为 −3,100'},
+  {k:'8幢|22号|01室|1', t:'<b>8幢 22号01室 1层</b>：88.73m² 小户型单价 97,696，高于 2 层的 95,784'},
+  {k:'11幢|29号|01室|8', t:'<b>11幢 8层</b>：29号01室 110,365 与 28/27号 110,366 存在 1 元尾差'}
+];
+
+function renderInfo(){
+  const box = document.getElementById('infoBody');
+  if(!selected){
+    const byB = ROWS.map(function(B, i){
+      const us = valid.filter(function(d){ return d.b === B.name; });
+      const avg = Math.round(us.reduce(function(s,d){ return s + d.p*d.a; }, 0) /
+                             us.reduce(function(s,d){ return s + d.a; }, 0));
+      const pos = i === 0 ? '最南' : (i === ROWS.length - 1 ? '最北' : '中');
+      const minS = Math.min.apply(null, us.map(function(d){ return d.s; }));
+      const full = us.filter(function(d){ return d.s >= 5.5; }).length;
+      return '<div class="kv" style="border:0;padding-bottom:1px"><span>' + B.name +
+        ' <span style="opacity:.6">· ' + pos + ' · ' + us.length + '套</span></span><b>' +
+        fmtI(avg) + ' 元/m²</b></div>' +
+        '<div class="kv" style="padding-top:0"><span style="font-size:11px;opacity:.75">　最低日照 ' +
+        minS + 'h · 满照 ' + full + '/' + us.length + '</span><b style="font-size:11px;color:' +
+        (SUN_COLOR[minS] || '#888') + '">' + (minS >= 5.5 ? '无遮挡' : '受遮挡') + '</b></div>';
+    }).join('');
+    box.innerHTML = '<span class="tag">项目总览</span>' +
+      '<div class="sub" style="margin-bottom:10px">点击任意房源查看明细。灰色线框为该层无此户型。</div>' +
+      '<h3>分幢均价（南 → 北）</h3>' + byB +
+      '<hr><h3>南北关系与遮挡</h3>' +
+      '<div class="sub">楼栋自南向北依次 <b style="color:#e8ecf2">11幢 → 8幢 → 5幢</b>。' +
+      '最南的 11幢 48 套全部满照 5.5h；8幢 仅 1~2 层轻微削减；最北的 5幢 2~4 层被 8幢 明显遮挡，' +
+      '2 层低至 2h。主光源按上海冬至正午设置（正南、高度角≈35°），地面阴影方向即实际遮挡方向。' +
+      '<br><span style="color:#6f7b8c">楼栋间距与朝向为示意值：未取得项目总平面图，南北次序依据实勘信息。</span></div>' +
+      '<hr><h3>日照分布</h3>' +
+      [5.5,5,4.5,4,3.5,3,2.5,2].map(function(s){
+        const n = valid.filter(function(d){ return d.s === s; }).length;
+        return n ? '<div class="kv"><span>' + sunPill(s) + '</span><b>' + n + ' 套</b></div>' : '';
+      }).join('') +
+      '<hr><h3>数据疑点（源表）</h3>' +
+      FLAGS.map(function(f,i){ return '<button class="flagbtn" data-f="' + i + '">' + f.t + '</button>'; }).join('');
+    box.querySelectorAll('.flagbtn').forEach(function(b){
+      b.onclick = function(){
+        const k = FLAGS[+b.dataset.f].k;
+        const m = meshes.filter(function(x){
+          const d = x.userData.d;
+          return d.b+'|'+d.u+'|'+d.rm+'|'+d.fr === k;
+        })[0];
+        if(m){ hiddenB.delete(m.userData.d.b); syncChks(); select(m); flyTo(m); }
+      };
+    });
+    return;
+  }
+  const d = selected.userData.d, B = selected.userData.B, c = selected.userData.c;
+  const bi = ROWS.indexOf(B);
+  const posTxt = bi === 0 ? '最南' : (bi === ROWS.length - 1 ? '最北' : '中');
+  const rk = rankOf(d);
+  box.innerHTML = '<span class="tag">' + d.b + ' · ' + d.u + ' · ' + d.rm + '</span>' +
+    '<div class="big">' + fmtI(d.p) + ' <span style="font-size:12px;color:#8b96a6">元/m²</span></div>' +
+    '<div class="sub" style="margin-bottom:8px">总价 <b style="color:#e8ecf2">' + fmt2(d.t) +
+    ' 万</b>　·　98折参考 ' + fmt2(d.t*0.98) + ' 万</div>' +
+    '<div style="margin-bottom:2px">' + sunPill(d.s) + '</div>' +
+    '<button class="wishbtn' + (rk ? ' on' : '') + '" id="wishToggle">' +
+      (rk ? '移出意向（当前第 ' + rk + ' 名）' : '加入意向（第 ' + (wish.length + 1) + ' 名）') +
+    '</button>' +
+    (rk ? '<div class="rankctl">' +
+      '<button data-mv="-1"' + (rk === 1 ? ' disabled style="opacity:.4"' : '') + '>▲ 升一名</button>' +
+      '<button data-mv="1"' + (rk === wish.length ? ' disabled style="opacity:.4"' : '') + '>▼ 降一名</button>' +
+      '</div>' : '') +
+    '<div style="margin-top:8px"></div>' +
+    '<div class="kv"><span>场地位置</span><b>' + posTxt + '（南起第 ' + (bi+1) + ' 排）</b></div>' +
+    '<div class="kv"><span>实际楼层</span><b>' + d.fr + ' 层</b></div>' +
+    '<div class="kv"><span>名义楼层</span><b>' + d.fn + ' 层</b></div>' +
+    '<div class="kv"><span>建筑面积</span><b>' + fmt2(d.a) + ' m²</b></div>' +
+    '<div class="kv"><span>楼层单价差</span><b style="color:' +
+      (d.d == null ? '#8b96a6' : (d.d >= 0 ? '#e0473c' : '#3fb6d8')) + '">' + fmtD(d.d) + '</b></div>' +
+    '<div class="kv"><span>整列均价</span><b>' + fmtI(c.avg) + ' 元/m²</b></div>' +
+    (d.note ? '<div class="kv"><span>备注</span><b style="font-weight:500;color:#8b96a6">' + d.note + '</b></div>' : '') +
+    '<hr><h3>该房号价格·楼层曲线</h3>' + priceCurve(B, c, d.fr) +
+    '<hr><h3>' + B.name + ' 整列均价</h3>' + colBars(B);
+
+  box.querySelector('#wishToggle').onclick = function(){ wishToggle(d); };
+  box.querySelectorAll('.rankctl button').forEach(function(b){
+    b.onclick = function(){ if(!b.disabled) wishMove(keyOf(d), +b.dataset.mv); };
+  });
+}
+
+function updateLegend(){
+  const titles = {price:'单价 元/m²', total:'总价 万元', sun:'日照时长 小时', diff:'楼层单价差 元/m²', area:'建筑面积 m²'};
+  document.getElementById('legendTitle').textContent = titles[mode];
+  const rampEl = document.getElementById('ramp'), ticks = document.getElementById('rampTicks'),
+        sw = document.getElementById('swatches');
+  if(mode === 'sun'){
+    rampEl.style.display = 'none'; ticks.style.display = 'none';
+    sw.innerHTML = [5.5,5,4.5,4,3.5,3,2.5,2].map(function(s){
+      return '<i><s style="background:' + SUN_COLOR[s] + '"></s>' + s + 'h</i>';
+    }).join('');
+    return;
+  }
+  sw.innerHTML = '<i><s style="background:#3a4250"></s>无此户型 / 无价差</i>';
+  rampEl.style.display = ''; ticks.style.display = 'flex';
+  const stops = mode === 'diff' ? DIVERGE : RAMP;
+  rampEl.style.background = 'linear-gradient(90deg,' + stops.join(',') + ')';
+  const e = mode === 'diff' ? [-7000, 7000] : EXT[mode];
+  ticks.children[0].textContent = (mode === 'total' || mode === 'area') ? fmt2(e[0]) : fmtI(e[0]);
+  ticks.children[1].textContent = (mode === 'total' || mode === 'area') ? fmt2(e[1]) : fmtI(e[1]);
+}
+
+/* ---- 控件 ---- */
+document.getElementById('modes').onclick = function(e){
+  const b = e.target.closest('button'); if(!b) return;
+  mode = b.dataset.m;
+  this.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x === b); });
+  applyStyle();
+};
+const bd = document.getElementById('budget'), oB = document.getElementById('oBudget');
+bd.oninput = function(){
+  budget = +bd.value;
+  oB.textContent = budget >= 1190 ? '不限' : '≤ ' + budget + ' 万';
+  applyStyle();
+};
+const sm = document.getElementById('sunMin'), oS = document.getElementById('oSun');
+sm.oninput = function(){
+  sunMin = +sm.value;
+  oS.textContent = sunMin <= 2 ? '不限' : '≥ ' + sunMin + ' 小时';
+  applyStyle();
+};
+bd.oninput(); sm.oninput();
+
+const chkWrap = document.getElementById('bldgChks');
+chkWrap.innerHTML = ROWS.map(function(B, i){
+  const pos = i === 0 ? '南' : (i === ROWS.length - 1 ? '北' : '中');
+  return '<label class="chk"><input type="checkbox" data-b="' + B.name + '" checked> ' +
+    B.name + ' <span style="opacity:.6">（' + pos + '）</span></label>';
+}).join('');
+function syncChks(){
+  chkWrap.querySelectorAll('input').forEach(function(i){ i.checked = !hiddenB.has(i.dataset.b); });
+  ROWS.forEach(function(B){
+    const on = !hiddenB.has(B.name);
+    B.group.children.forEach(function(o){ if(!o.userData.d) o.visible = on; });
+    if(B.plate) B.plate.visible = on;
+  });
+}
+chkWrap.onchange = function(e){
+  const i = e.target;
+  if(i.checked) hiddenB.delete(i.dataset.b); else hiddenB.add(i.dataset.b);
+  syncChks(); applyStyle();
+};
+document.getElementById('cLabel').onchange = function(){ labelGroup.visible = this.checked; };
+document.getElementById('cFloor').onchange = function(){ floorGroup.visible = this.checked; };
+document.getElementById('cGhost').onchange = function(){ podGroup.visible = this.checked; };
+document.getElementById('cSunRay').onchange = function(){ sunViz.visible = this.checked; };
+
+/* ---- 视角：包围盒只取楼栋本体 ---- */
+const bbox = new THREE.Box3();
+ROWS.forEach(function(B){ bbox.expandByObject(B.group); });
+podGroup.children.forEach(function(p){ if(p.isMesh) bbox.expandByObject(p); });
+// 指北针也纳入取景，否则会被裁在画面外
+bbox.expandByPoint(compass.position.clone().add(new THREE.Vector3(5, 0, 5)));
+bbox.expandByPoint(compass.position.clone().add(new THREE.Vector3(-5, 0, -5)));
+const center = bbox.getCenter(new THREE.Vector3());
+const size = bbox.getSize(new THREE.Vector3());
+const eye = center.y + size.y * 0.12;
+const DIRS = {
+  iso  : new THREE.Vector3(0.55, 0.46, 1.00),   // 东南上方鸟瞰
+  front: new THREE.Vector3(0.00, 0.30, 1.00),   // 正南
+  side : new THREE.Vector3(1.00, 0.26, 0.02),   // 正东，看南北遮挡关系
+  top  : new THREE.Vector3(0.02, 1.00, 0.14)    // 俯视总平（略带南倾，避免奇异）
+};
+/* 按包围盒 8 个角点求最小相机距离：斜视角下场景纵深会把近处楼推到画面外，
+   单纯用 size.x / size.z 估算会严重取景过近。
+   mx / my 为可用视锥比例——左右面板约占视口 36% 宽度，故水平只用 0.62。 */
+const CORNERS = [];
+for(let i = 0; i < 8; i++){
+  CORNERS.push(new THREE.Vector3(
+    (i & 1) ? bbox.max.x : bbox.min.x,
+    (i & 2) ? bbox.max.y : bbox.min.y,
+    (i & 4) ? bbox.max.z : bbox.min.z));
+}
+function fitAlong(dir, tgt, mx, my){
+  const vfov = camera.fov * Math.PI/180;
+  const tanV = Math.tan(vfov/2) * my;
+  const tanH = Math.tan(vfov/2) * camera.aspect * mx;
+  const fwd = dir.clone().normalize();                                  // target → camera
+  let right = new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0), fwd);
+  if(right.lengthSq() < 1e-6) right.set(1,0,0);
+  right.normalize();
+  const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
+  let d = 1;
+  CORNERS.forEach(function(c){
+    const v = c.clone().sub(tgt);
+    const z = v.dot(fwd), x = Math.abs(v.dot(right)), y = Math.abs(v.dot(up));
+    d = Math.max(d, z + x/tanH, z + y/tanV);
+  });
+  return d * 1.06;                                                      // 一点呼吸空间
+}
+function viewTarget(key){
+  return new THREE.Vector3(center.x, key === 'top' ? 0 : eye, 0);
+}
+function viewPos(v){
+  const key = DIRS[v] ? v : 'iso';
+  const tgt = viewTarget(key);
+  const d = fitAlong(DIRS[key], tgt, 0.62, 0.90);
+  return tgt.clone().add(DIRS[key].clone().normalize().multiplyScalar(d));
+}
+let camGoal = null, tgtGoal = null;
+function goView(v){
+  const key = DIRS[v] ? v : 'iso';
+  camGoal = viewPos(key);
+  tgtGoal = viewTarget(key);
+}
+function flyTo(m){
+  const p = m.getWorldPosition(new THREE.Vector3());
+  camGoal = p.clone().add(new THREE.Vector3(7, 5.5, 22));
+  tgtGoal = p.clone();
+}
+document.getElementById('views').onclick = function(e){
+  const b = e.target.closest('button'); if(!b) return;
+  goView(b.dataset.v);
+};
+camera.position.copy(viewPos('iso'));
+controls.target.set(center.x, eye, 0);
+
+/* ---- KPI ---- */
+document.getElementById('kpiAvg').textContent = fmtI(SUM_MONEY*10000/SUM_AREA);
+document.getElementById('kpiCnt').textContent = valid.length;
+document.getElementById('kpiArea').textContent = fmtI(SUM_AREA);
+
+refreshWish();
+
+/* 深链: ...#view=side&mode=sun&cmp=1&sel=5幢|9号|01室|9&wish=key1,key2
+   wish 参数可把整份意向清单分享出去（对比面板里有「复制分享链接」） */
+(function fromHash(){
+  const h = decodeURIComponent(location.hash.replace(/^#/, ''));
+  if(!h) return;
+  const q = {};
+  h.split('&').forEach(function(kv){
+    const i = kv.indexOf('=');
+    if(i > 0) q[kv.slice(0, i)] = kv.slice(i + 1);
+  });
+  if(q.wish){
+    const list = q.wish.split(',').map(function(s){ return s.trim(); })
+      .filter(function(k){ return meshByKey.has(k); });
+    if(list.length){ wish = list; refreshWish(); }
+  }
+  if(q.view) goView(q.view);
+  if(q.mode){
+    const b = document.querySelector('#modes button[data-m="' + q.mode + '"]');
+    if(b) b.click();
+  }
+  if(q.sel){
+    const m = meshByKey.get(q.sel);
+    if(m){ select(m); flyTo(m); }
+  }
+  if(q.cmp === '1') setCmp(true);
+})();
+
+document.getElementById('cmpLink').onclick = function(){
+  const url = location.href.split('#')[0] + '#mode=' + mode + '&cmp=1&wish=' + wish.join(',');
+  const btn = this, old = btn.textContent;
+  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+    .then(function(){ btn.textContent = '链接已复制 ✓'; })
+    .catch(function(){ btn.textContent = '复制失败'; })
+    .then(function(){ setTimeout(function(){ btn.textContent = old; }, 1500); });
+};
+
+addEventListener('resize', function(){
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+(function loop(){
+  requestAnimationFrame(loop);
+  if(camGoal){
+    camera.position.lerp(camGoal, 0.09);
+    controls.target.lerp(tgtGoal, 0.09);
+    if(camera.position.distanceTo(camGoal) < 0.4){ camGoal = null; tgtGoal = null; }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+})();
+})();
+</script>
+</body>
+</html>

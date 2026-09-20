@@ -1,0 +1,13 @@
+# 本地工具配置（与项目内容无关）
+.kiro/
+
+# 验证用截图，按需重新生成即可
+.build/shots/
+
+# 无头浏览器临时 profile
+.build/**/prof/
+.build/**/p[0-9]/
+.build/**/pw[0-9]/
+
+# macOS
+.DS_Store
